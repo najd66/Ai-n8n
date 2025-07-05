@@ -1,0 +1,355 @@
+{
+  "name": "AGI Forex Trading Intelligence System",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Define the top forex pairs and gold to monitor\nconst symbols = [\n  'EURUSD', 'USDJPY', 'GBPUSD', 'AUDUSD', 'USDCAD',\n  'USDCHF', 'NZDUSD', 'EURJPY', 'EURGBP', 'GBPJPY',\n  'XAUUSD' // Gold\n];\n\n// Define multiple timeframes for multi-timeframe analysis\nconst timeframes = ['5m', '15m', '1h', '4h', 'D'];\n\n// Create items for each symbol and timeframe combination\nconst items = [];\n\nfor (const symbol of symbols) {\n  // Create one item per symbol to avoid excessive parallel processing\n  items.push({\n    json: {\n      symbol,\n      timeframes,\n      timestamp: new Date().toISOString(),\n      requestId: Date.now().toString(),\n      analysisTypes: ['technical', 'sentiment', 'market_structure', 'correlation']\n    }\n  });\n}\n\nreturn items;"
+      },
+      "name": "Prepare Analysis Targets",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "name": "Process Each Symbol",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract the current symbol and timeframes to analyze\nconst symbol = $input.item.json.symbol;\nconst timeframes = $input.item.json.timeframes;\n\n// Create a multi-timeframe data structure\nconst multiTimeframeData = {};\n\n// For each timeframe, we'll fetch and process data\nfor (const timeframe of timeframes) {\n  // In a real implementation, this would call an actual API\n  // For now, we'll generate mock data for demonstration\n  multiTimeframeData[timeframe] = generateMockForexData(symbol, timeframe, 200);\n}\n\n// Helper function to generate mock forex data\nfunction generateMockForexData(symbol, timeframe, count) {\n  const candles = [];\n  const now = new Date();\n  const basePrice = symbol === 'XAUUSD' ? 2000 : (symbol.includes('JPY') ? 150 : 1.1);\n  const volatility = symbol === 'XAUUSD' ? 5 : (symbol.includes('JPY') ? 0.5 : 0.0005);\n  let currentPrice = basePrice;\n  \n  // Generate candles in reverse order (oldest first)\n  for (let i = count - 1; i >= 0; i--) {\n    const minutesAgo = i * getTimeframeMinutes(timeframe);\n    const timestamp = new Date(now.getTime() - minutesAgo * 60 * 1000);\n    \n    // Add some randomness but maintain a trend\n    const trendBias = Math.sin(i / 20) * volatility * 0.5; // Create cyclic trends\n    const randomChange = (Math.random() - 0.5) * volatility + trendBias;\n    currentPrice += randomChange;\n    \n    const open = currentPrice;\n    const high = open + Math.random() * volatility;\n    const low = open - Math.random() * volatility;\n    const close = low + Math.random() * (high - low);\n    const volume = Math.floor(Math.random() * 1000) + 500;\n    \n    candles.push({\n      timestamp: timestamp.toISOString(),\n      open,\n      high,\n      low,\n      close,\n      volume\n    });\n  }\n  \n  return candles;\n}\n\n// Helper function to convert timeframe to minutes\nfunction getTimeframeMinutes(timeframe) {\n  switch(timeframe) {\n    case '1m': return 1;\n    case '5m': return 5;\n    case '15m': return 15;\n    case '30m': return 30;\n    case '1h': return 60;\n    case '4h': return 240;\n    case 'D': return 1440;\n    default: return 15;\n  }\n}\n\n// Return the multi-timeframe data structure\nreturn {\n  json: {\n    symbol,\n    multiTimeframeData,\n    timestamp: new Date().toISOString(),\n    requestId: $input.item.json.requestId\n  }\n};"
+      },
+      "name": "Fetch Multi-Timeframe Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Get the multi-timeframe data\nconst symbol = $input.item.json.symbol;\nconst multiTimeframeData = $input.item.json.multiTimeframeData;\nconst timeframes = Object.keys(multiTimeframeData);\n\n// Initialize the technical analysis results object\nconst technicalAnalysis = {};\n\n// Process each timeframe\nfor (const timeframe of timeframes) {\n  const candles = multiTimeframeData[timeframe];\n  \n  // Calculate technical indicators for this timeframe\n  technicalAnalysis[timeframe] = calculateTechnicalIndicators(candles);\n}\n\n// Function to calculate technical indicators\nfunction calculateTechnicalIndicators(candles) {\n  // Extract price data\n  const closes = candles.map(c => c.close);\n  const highs = candles.map(c => c.high);\n  const lows = candles.map(c => c.low);\n  const volumes = candles.map(c => c.volume);\n  \n  // Calculate RSI\n  const rsi = calculateRSI(closes);\n  \n  // Calculate Moving Averages\n  const sma20 = calculateSMA(closes, 20);\n  const sma50 = calculateSMA(closes, 50);\n  const sma200 = calculateSMA(closes, 200);\n  const ema20 = calculateEMA(closes, 20);\n  \n  // Calculate MACD\n  const macd = calculateMACD(closes);\n  \n  // Calculate Bollinger Bands\n  const bollingerBands = calculateBollingerBands(closes);\n  \n  // Calculate ATR for volatility\n  const atr = calculateATR(candles);\n  \n  // Calculate Stochastic Oscillator\n  const stochastic = calculateStochastic(closes, highs, lows);\n  \n  // Calculate Ichimoku Cloud\n  const ichimoku = calculateIchimoku(candles);\n  \n  // Calculate Support and Resistance levels\n  const supportResistance = calculateSupportResistance(candles);\n  \n  // Calculate Fibonacci levels based on recent swing high/low\n  const fibonacci = calculateFibonacciLevels(candles);\n  \n  // Calculate Volume Profile\n  const volumeProfile = calculateVolumeProfile(candles);\n  \n  // Calculate Market Structure (Higher Highs/Lower Lows)\n  const marketStructure = analyzeMarketStructure(candles);\n  \n  // Calculate Momentum\n  const momentum = calculateMomentum(closes);\n  \n  // Calculate Volatility\n  const volatility = calculateVolatility(closes);\n  \n  // Detect chart patterns\n  const patterns = detectChartPatterns(candles);\n  \n  // Current price\n  const currentPrice = closes[closes.length - 1];\n  \n  // Return all indicators\n  return {\n    currentPrice,\n    rsi,\n    sma: { sma20, sma50, sma200 },\n    ema: { ema20 },\n    macd,\n    bollingerBands,\n    atr,\n    stochastic,\n    ichimoku,\n    supportResistance,\n    fibonacci,\n    volumeProfile,\n    marketStructure,\n    momentum,\n    volatility,\n    patterns\n  };\n}\n\n// RSI calculation\nfunction calculateRSI(prices, period = 14) {\n  if (prices.length < period + 1) {\n    return 50; // Default value if not enough data\n  }\n  \n  let gains = 0;\n  let losses = 0;\n  \n  // Calculate initial gains and losses\n  for (let i = 1; i <= period; i++) {\n    const change = prices[i] - prices[i-1];\n    if (change >= 0) {\n      gains += change;\n    } else {\n      losses -= change;\n    }\n  }\n  \n  let avgGain = gains / period;\n  let avgLoss = losses / period;\n  \n  // Calculate RSI using the smoothed method\n  for (let i = period + 1; i < prices.length; i++) {\n    const change = prices[i] - prices[i-1];\n    if (change >= 0) {\n      avgGain = (avgGain * (period - 1) + change) / period;\n      avgLoss = (avgLoss * (period - 1)) / period;\n    } else {\n      avgGain = (avgGain * (period - 1)) / period;\n      avgLoss = (avgLoss * (period - 1) - change) / period;\n    }\n  }\n  \n  if (avgLoss === 0) {\n    return 100;\n  }\n  \n  const RS = avgGain / avgLoss;\n  return 100 - (100 / (1 + RS));\n}\n\n// SMA calculation\nfunction calculateSMA(prices, period) {\n  if (prices.length < period) {\n    return null;\n  }\n  \n  let sum = 0;\n  for (let i = prices.length - period; i < prices.length; i++) {\n    sum += prices[i];\n  }\n  return sum / period;\n}\n\n// EMA calculation\nfunction calculateEMA(prices, period) {\n  if (prices.length < period) {\n    return null;\n  }\n  \n  let ema = calculateSMA(prices.slice(0, period), period);\n  const multiplier = 2 / (period + 1);\n  \n  for (let i = period; i < prices.length; i++) {\n    ema = (prices[i] - ema) * multiplier + ema;\n  }\n  \n  return ema;\n}\n\n// MACD calculation\nfunction calculateMACD(prices) {\n  const ema12 = calculateEMA(prices, 12);\n  const ema26 = calculateEMA(prices, 26);\n  \n  if (ema12 === null || ema26 === null) {\n    return { macdLine: 0, signalLine: 0, histogram: 0 };\n  }\n  \n  const macdLine = ema12 - ema26;\n  const signalLine = calculateEMA([...prices.slice(0, prices.length - 9), macdLine], 9);\n  const histogram = macdLine - signalLine;\n  \n  return { macdLine, signalLine, histogram };\n}\n\n// Bollinger Bands calculation\nfunction calculateBollingerBands(prices, period = 20, stdDev = 2) {\n  if (prices.length < period) {\n    return { upper: null, middle: null, lower: null };\n  }\n  \n  const sma = calculateSMA(prices, period);\n  \n  // Calculate standard deviation\n  let sum = 0;\n  for (let i = prices.length - period; i < prices.length; i++) {\n    sum += Math.pow(prices[i] - sma, 2);\n  }\n  const std = Math.sqrt(sum / period);\n  \n  return {\n    upper: sma + (stdDev * std),\n    middle: sma,\n    lower: sma - (stdDev * std)\n  };\n}\n\n// ATR calculation\nfunction calculateATR(candles, period = 14) {\n  if (candles.length < period + 1) {\n    return 0;\n  }\n  \n  const trueRanges = [];\n  \n  // Calculate true ranges\n  for (let i = 1; i < candles.length; i++) {\n    const high = candles[i].high;\n    const low = candles[i].low;\n    const prevClose = candles[i-1].close;\n    \n    const tr1 = high - low;\n    const tr2 = Math.abs(high - prevClose);\n    const tr3 = Math.abs(low - prevClose);\n    \n    const trueRange = Math.max(tr1, tr2, tr3);\n    trueRanges.push(trueRange);\n  }\n  \n  // Calculate ATR as simple average of true ranges\n  const recentTR = trueRanges.slice(-period);\n  const atr = recentTR.reduce((sum, tr) => sum + tr, 0) / period;\n  \n  return atr;\n}\n\n// Stochastic Oscillator calculation\nfunction calculateStochastic(closes, highs, lows, kPeriod = 14, dPeriod = 3) {\n  if (closes.length < kPeriod) {\n    return { k: 50, d: 50 };\n  }\n  \n  // Calculate %K\n  const recentCloses = closes.slice(-kPeriod);\n  const recentHighs = highs.slice(-kPeriod);\n  const recentLows = lows.slice(-kPeriod);\n  \n  const highestHigh = Math.max(...recentHighs);\n  const lowestLow = Math.min(...recentLows);\n  \n  const currentClose = closes[closes.length - 1];\n  const k = ((currentClose - lowestLow) / (highestHigh - lowestLow)) * 100;\n  \n  // For simplicity, we'll approximate %D\n  const d = k * 0.9; // Approximation\n  \n  return { k, d };\n}\n\n// Ichimoku Cloud calculation (simplified)\nfunction calculateIchimoku(candles) {\n  const highs = candles.map(c => c.high);\n  const lows = candles.map(c => c.low);\n  const closes = candles.map(c => c.close);\n  \n  // Tenkan-sen (Conversion Line): (9-period high + 9-period low)/2\n  const tenkanSen = (Math.max(...highs.slice(-9)) + Math.min(...lows.slice(-9))) / 2;\n  \n  // Kijun-sen (Base Line): (26-period high + 26-period low)/2\n  const kijunSen = (Math.max(...highs.slice(-26)) + Math.min(...lows.slice(-26))) / 2;\n  \n  // Senkou Span A (Leading Span A): (Tenkan-sen + Kijun-sen)/2\n  const senkouSpanA = (tenkanSen + kijunSen) / 2;\n  \n  // Senkou Span B (Leading Span B): (52-period high + 52-period low)/2\n  const senkouSpanB = (Math.max(...highs.slice(-52)) + Math.min(...lows.slice(-52))) / 2;\n  \n  // Chikou Span (Lagging Span): Current closing price time-shifted backwards 26 periods\n  const chikouSpan = closes[closes.length - 1];\n  \n  return {\n    tenkanSen,\n    kijunSen,\n    senkouSpanA,\n    senkouSpanB,\n    chikouSpan\n  };\n}\n\n// Support and Resistance calculation\nfunction calculateSupportResistance(candles) {\n  const highs = candles.map(c => c.high);\n  const lows = candles.map(c => c.low);\n  \n  // Find local maxima and minima\n  const resistanceLevels = [];\n  const supportLevels = [];\n  \n  // Look for patterns in recent candles (last 30)\n  const recentCandles = candles.slice(-30);\n  \n  for (let i = 5; i < recentCandles.length - 5; i++) {\n    // Check for resistance (local high)\n    if (recentCandles[i].high > recentCandles[i-1].high && \n        recentCandles[i].high > recentCandles[i-2].high &&\n        recentCandles[i].high > recentCandles[i+1].high && \n        recentCandles[i].high > recentCandles[i+2].high) {\n      resistanceLevels.push(recentCandles[i].high);\n    }\n    \n    // Check for support (local low)\n    if (recentCandles[i].low < recentCandles[i-1].low && \n        recentCandles[i].low < recentCandles[i-2].low &&\n        recentCandles[i].low < recentCandles[i+1].low && \n        recentCandles[i].low < recentCandles[i+2].low) {\n      supportLevels.push(recentCandles[i].low);\n    }\n  }\n  \n  // Group similar levels (within 0.1%)\n  const groupedResistance = groupSimilarLevels(resistanceLevels, 0.001);\n  const groupedSupport = groupSimilarLevels(supportLevels, 0.001);\n  \n  return {\n    resistance: groupedResistance.slice(0, 3), // Top 3 resistance levels\n    support: groupedSupport.slice(0, 3) // Top 3 support levels\n  };\n}\n\n// Helper function to group similar price levels\nfunction groupSimilarLevels(levels, threshold) {\n  if (levels.length === 0) return [];\n  \n  // Sort levels\n  levels.sort((a, b) => a - b);\n  \n  const groups = [];\n  let currentGroup = [levels[0]];\n  \n  for (let i = 1; i < levels.length; i++) {\n    const currentLevel = levels[i];\n    const prevLevel = levels[i-1];\n    \n    // Check if current level is within threshold of previous level\n    if ((currentLevel - prevLevel) / prevLevel < threshold) {\n      // Add to current group\n      currentGroup.push(currentLevel);\n    } else {\n      // Create a new group\n      groups.push(currentGroup);\n      currentGroup = [currentLevel];\n    }\n  }\n  \n  // Add the last group\n  if (currentGroup.length > 0) {\n    groups.push(currentGroup);\n  }\n  \n  // Calculate average value for each group\n  return groups.map(group => {\n    const sum = group.reduce((acc, val) => acc + val, 0);\n    return sum / group.length;\n  });\n}\n\n// Fibonacci levels calculation\nfunction calculateFibonacciLevels(candles) {\n  // Find recent swing high and low\n  const recentCandles = candles.slice(-50);\n  let swingHigh = -Infinity;\n  let swingLow = Infinity;\n  \n  for (const candle of recentCandles) {\n    if (candle.high > swingHigh) swingHigh = candle.high;\n    if (candle.low < swingLow) swingLow = candle.low;\n  }\n  \n  const range = swingHigh - swingLow;\n  \n  // Calculate Fibonacci retracement levels\n  return {\n    level0: swingLow, // 0%\n    level236: swingLow + range * 0.236, // 23.6%\n    level382: swingLow + range * 0.382, // 38.2%\n    level50: swingLow + range * 0.5, // 50%\n    level618: swingLow + range * 0.618, // 61.8%\n    level786: swingLow + range * 0.786, // 78.6%\n    level100: swingHigh // 100%\n  };\n}\n\n// Volume Profile calculation (simplified)\nfunction calculateVolumeProfile(candles) {\n  // Divide the price range into 10 zones\n  const prices = candles.map(c => c.close);\n  const volumes = candles.map(c => c.volume);\n  \n  const minPrice = Math.min(...prices);\n  const maxPrice = Math.max(...prices);\n  const priceRange = maxPrice - minPrice;\n  const zoneSize = priceRange / 10;\n  \n  // Initialize volume zones\n  const volumeZones = Array(10).fill(0);\n  \n  // Assign volume to each zone\n  for (let i = 0; i < prices.length; i++) {\n    const zoneIndex = Math.min(9, Math.floor((prices[i] - minPrice) / zoneSize));\n    volumeZones[zoneIndex] += volumes[i];\n  }\n  \n  // Find the zone with highest volume (Point of Control)\n  let maxVolumeIndex = 0;\n  for (let i = 1; i < volumeZones.length; i++) {\n    if (volumeZones[i] > volumeZones[maxVolumeIndex]) {\n      maxVolumeIndex = i;\n    }\n  }\n  \n  const poc = minPrice + (maxVolumeIndex + 0.5) * zoneSize;\n  \n  return {\n    volumeZones,\n    pointOfControl: poc,\n    valueArea: [poc * 0.95, poc * 1.05] // Simplified value area\n  };\n}\n\n// Market Structure analysis\nfunction analyzeMarketStructure(candles) {\n  // Find swing highs and lows\n  const swingHighs = [];\n  const swingLows = [];\n  \n  // Look at recent candles\n  const recentCandles = candles.slice(-30);\n  \n  for (let i = 5; i < recentCandles.length - 5; i++) {\n    // Check for swing high\n    if (recentCandles[i].high > recentCandles[i-1].high && \n        recentCandles[i].high > recentCandles[i-2].high &&\n        recentCandles[i].high > recentCandles[i+1].high && \n        recentCandles[i].high > recentCandles[i+2].high) {\n      swingHighs.push({\n        price: recentCandles[i].high,\n        index: i\n      });\n    }\n    \n    // Check for swing low\n    if (recentCandles[i].low < recentCandles[i-1].low && \n        recentCandles[i].low < recentCandles[i-2].low &&\n        recentCandles[i].low < recentCandles[i+1].low && \n        recentCandles[i].low < recentCandles[i+2].low) {\n      swingLows.push({\n        price: recentCandles[i].low,\n        index: i\n      });\n    }\n  }\n  \n  // Sort by index\n  swingHighs.sort((a, b) => a.index - b.index);\n  swingLows.sort((a, b) => a.index - b.index);\n  \n  // Check for higher highs and higher lows (uptrend)\n  let higherHighs = false;\n  let higherLows = false;\n  \n  if (swingHighs.length >= 2) {\n    higherHighs = swingHighs[swingHighs.length - 1].price > swingHighs[swingHighs.length - 2].price;\n  }\n  \n  if (swingLows.length >= 2) {\n    higherLows = swingLows[swingLows.length - 1].price > swingLows[swingLows.length - 2].price;\n  }\n  \n  // Check for lower highs and lower lows (downtrend)\n  let lowerHighs = false;\n  let lowerLows = false;\n  \n  if (swingHighs.length >= 2) {\n    lowerHighs = swingHighs[swingHighs.length - 1].price < swingHighs[swingHighs.length - 2].price;\n  }\n  \n  if (swingLows.length >= 2) {\n    lowerLows = swingLows[swingLows.length - 1].price < swingLows[swingLows.length - 2].price;\n  }\n  \n  // Determine trend\n  let trend;\n  if (higherHighs && higherLows) {\n    trend = 'uptrend';\n  } else if (lowerHighs && lowerLows) {\n    trend = 'downtrend';\n  } else {\n    trend = 'ranging';\n  }\n  \n  return {\n    trend,\n    swingHighs: swingHighs.map(sh => sh.price),\n    swingLows: swingLows.map(sl => sl.price),\n    higherHighs,\n    higherLows,\n    lowerHighs,\n    lowerLows\n  };\n}\n\n// Momentum calculation\nfunction calculateMomentum(prices, period = 10) {\n  if (prices.length < period) {\n    return 0;\n  }\n  \n  const currentPrice = prices[prices.length - 1];\n  const pastPrice = prices[prices.length - period];\n  \n  return (currentPrice / pastPrice) * 100;\n}\n\n// Volatility calculation\nfunction calculateVolatility(prices, period = 20) {\n  if (prices.length < period) {\n    return 0;\n  }\n  \n  const returns = [];\n  for (let i = 1; i < prices.length; i++) {\n    returns.push((prices[i] - prices[i-1]) / prices[i-1]);\n  }\n  \n  const recentReturns = returns.slice(-period);\n  const meanReturn = recentReturns.reduce((sum, ret) => sum + ret, 0) / period;\n  \n  // Calculate standard deviation of returns\n  const squaredDiffs = recentReturns.map(ret => Math.pow(ret - meanReturn, 2));\n  const variance = squaredDiffs.reduce((sum, diff) => sum + diff, 0) / period;\n  const stdDev = Math.sqrt(variance);\n  \n  // Annualized volatility (approximation)\n  return stdDev * Math.sqrt(252) * 100; // Assuming 252 trading days in a year\n}\n\n// Chart pattern detection\nfunction detectChartPatterns(candles) {\n  const patterns = [];\n  \n  // Check for bullish engulfing\n  for (let i = 1; i < candles.length; i++) {\n    const current = candles[i];\n    const previous = candles[i-1];\n    \n    // Bullish engulfing\n    if (current.close > current.open && \n        previous.close < previous.open && \n        current.open < previous.close && \n        current.close > previous.open) {\n      patterns.push({\n        type: 'bullish_engulfing',\n        index: i,\n        confidence: 'high'\n      });\n    }\n    \n    // Bearish engulfing\n    if (current.close < current.open && \n        previous.close > previous.open && \n        current.open > previous.close && \n        current.close < previous.open) {\n      patterns.push({\n        type: 'bearish_engulfing',\n        index: i,\n        confidence: 'high'\n      });\n    }\n    \n    // Doji\n    if (Math.abs(current.open - current.close) / (current.high - current.low) < 0.1) {\n      patterns.push({\n        type: 'doji',\n        index: i,\n        confidence: 'medium'\n      });\n    }\n  }\n  \n  // Return only the most recent patterns (last 5 candles)\n  return patterns.filter(p => p.index >= candles.length - 5);\n}\n\n// Return the technical analysis results\nreturn {\n  json: {\n    symbol,\n    technicalAnalysis,\n    timestamp: new Date().toISOString(),\n    requestId: $input.item.json.requestId\n  }\n};"
+      },
+      "name": "Perform Technical Analysis",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Get the symbol and technical analysis data\nconst symbol = $input.item.json.symbol;\nconst technicalAnalysis = $input.item.json.technicalAnalysis;\nconst timeframes = Object.keys(technicalAnalysis);\n\n// Fetch market sentiment data (mock implementation)\nconst sentimentData = fetchMarketSentiment(symbol);\n\n// Fetch correlation data with other markets (mock implementation)\nconst correlationData = fetchCorrelationData(symbol);\n\n// Fetch economic calendar events (mock implementation)\nconst economicEvents = fetchEconomicEvents(symbol);\n\n// Combine all data sources for multi-dimensional analysis\nconst combinedAnalysis = {\n  symbol,\n  timestamp: new Date().toISOString(),\n  technicalAnalysis,\n  sentimentAnalysis: sentimentData,\n  correlationAnalysis: correlationData,\n  economicEvents,\n  marketRegime: determineMarketRegime(technicalAnalysis, sentimentData)\n};\n\n// Mock function to fetch market sentiment\nfunction fetchMarketSentiment(symbol) {\n  // In a real implementation, this would call an API or analyze news/social media\n  const sentimentScores = {\n    'EURUSD': { bullish: 65, bearish: 35, neutral: 10 },\n    'USDJPY': { bullish: 45, bearish: 55, neutral: 15 },\n    'GBPUSD': { bullish: 55, bearish: 45, neutral: 20 },\n    'AUDUSD': { bullish: 60, bearish: 40, neutral: 10 },\n    'USDCAD': { bullish: 40, bearish: 60, neutral: 15 },\n    'USDCHF': { bullish: 45, bearish: 55, neutral: 20 },\n    'NZDUSD': { bullish: 50, bearish: 50, neutral: 25 },\n    'EURJPY': { bullish: 55, bearish: 45, neutral: 15 },\n    'EURGBP': { bullish: 45, bearish: 55, neutral: 20 },\n    'GBPJPY': { bullish: 60, bearish: 40, neutral: 10 },\n    'XAUUSD': { bullish: 70, bearish: 30, neutral: 15 }\n  };\n  \n  // Add some randomness to sentiment\n  const randomFactor = Math.random() * 10 - 5; // -5 to +5\n  const sentiment = sentimentScores[symbol] || { bullish: 50, bearish: 50, neutral: 20 };\n  \n  sentiment.bullish = Math.min(100, Math.max(0, sentiment.bullish + randomFactor));\n  sentiment.bearish = Math.min(100, Math.max(0, sentiment.bearish - randomFactor));\n  \n  // Calculate overall sentiment\n  let overallSentiment;\n  if (sentiment.bullish > sentiment.bearish + 10) {\n    overallSentiment = 'bullish';\n  } else if (sentiment.bearish > sentiment.bullish + 10) {\n    overallSentiment = 'bearish';\n  } else {\n    overallSentiment = 'neutral';\n  }\n  \n  // Mock news sentiment\n  const newsSentiment = {\n    recent_news: [\n      {\n        title: `${symbol} Analysis: Market shows ${overallSentiment} bias`,\n        sentiment: overallSentiment,\n        source: 'Financial Times',\n        timestamp: new Date(Date.now() - 3600000).toISOString() // 1 hour ago\n      },\n      {\n        title: `Economic data impacts ${symbol}`,\n        sentiment: Math.random() > 0.5 ? 'bullish' : 'bearish',\n        source: 'Bloomberg',\n        timestamp: new Date(Date.now() - 7200000).toISOString() // 2 hours ago\n      }\n    ],\n    social_media: {\n      twitter: overallSentiment,\n      reddit: overallSentiment,\n      stocktwits: overallSentiment\n    }\n  };\n  \n  return {\n    overall: overallSentiment,\n    scores: sentiment,\n    news: newsSentiment,\n    institutional_positioning: Math.random() > 0.5 ? 'net_long' : 'net_short'\n  };\n}\n\n// Mock function to fetch correlation data\nfunction fetchCorrelationData(symbol) {\n  // Define correlation pairs based on the symbol\n  let correlationPairs = [];\n  \n  if (symbol.includes('USD')) {\n    correlationPairs.push('DXY'); // US Dollar Index\n  }\n  \n  if (symbol === 'XAUUSD') {\n    correlationPairs.push('DXY', 'US10Y', 'SPX500'); // Gold correlates with USD, bonds, and stocks\n  }\n  \n  if (symbol.includes('EUR')) {\n    correlationPairs.push('BUND', 'DAX'); // European bonds and stocks\n  }\n  \n  if (symbol.includes('JPY')) {\n    correlationPairs.push('NIKKEI', 'US10Y'); // Japanese stocks and US bonds\n  }\n  \n  if (symbol.includes('GBP')) {\n    correlationPairs.push('FTSE', 'UK10Y'); // UK stocks and bonds\n  }\n  \n  // Generate mock correlation data\n  const correlations = {};\n  correlationPairs.forEach(pair => {\n    // Random correlation between -1 and 1\n    correlations[pair] = Math.round((Math.random() * 2 - 1) * 100) / 100;\n  });\n  \n  // Add some specific correlations that make sense\n  if (symbol === 'XAUUSD') {\n    correlations['DXY'] = -0.8; // Gold typically negatively correlated with USD\n    correlations['US10Y'] = -0.6; // Gold typically negatively correlated with yields\n  }\n  \n  if (symbol.includes('USD')) {\n    correlations['US10Y'] = 0.7; // USD typically positively correlated with US yields\n  }\n  \n  return {\n    correlations,\n    strongest_correlation: Object.entries(correlations).reduce((a, b) => Math.abs(a[1]) > Math.abs(b[1]) ? a : b)[0],\n    correlation_impact: 'moderate' // Could be 'strong', 'moderate', 'weak'\n  };\n}\n\n// Mock function to fetch economic events\nfunction fetchEconomicEvents(symbol) {\n  // Determine which economy's events to fetch based on the symbol\n  let economies = [];\n  \n  if (symbol.includes('USD')) economies.push('US');\n  if (symbol.includes('EUR')) economies.push('EU');\n  if (symbol.includes('GBP')) economies.push('UK');\n  if (symbol.includes('JPY')) economies.push('JP');\n  if (symbol.includes('AUD')) economies.push('AU');\n  if (symbol.includes('CAD')) economies.push('CA');\n  if (symbol.includes('CHF')) economies.push('CH');\n  if (symbol.includes('NZD')) economies.push('NZ');\n  \n  // If no specific economy, default to major economies\n  if (economies.length === 0) {\n    economies = ['US', 'EU', 'UK', 'JP'];\n  }\n  \n  // Generate mock upcoming events\n  const upcomingEvents = [];\n  const eventTypes = ['Interest Rate Decision', 'GDP', 'CPI', 'NFP', 'Retail Sales', 'PMI'];\n  \n  economies.forEach(economy => {\n    // Add 1-2 random events per economy\n    const numEvents = Math.floor(Math.random() * 2) + 1;\n    \n    for (let i = 0; i < numEvents; i++) {\n      const eventType = eventTypes[Math.floor(Math.random() * eventTypes.length)];\n      const daysAhead = Math.floor(Math.random() * 7) + 1; // 1-7 days ahead\n      \n      upcomingEvents.push({\n        economy,\n        event: eventType,\n        date: new Date(Date.now() + daysAhead * 86400000).toISOString().split('T')[0],\n        importance: Math.random() > 0.7 ? 'high' : (Math.random() > 0.5 ? 'medium' : 'low'),\n        forecast: 'N/A',\n        previous: 'N/A'\n      });\n    }\n  });\n  \n  // Sort by date\n  upcomingEvents.sort((a, b) => new Date(a.date) - new Date(b.date));\n  \n  return {\n    upcoming_events: upcomingEvents,\n    recent_events: [], // Would contain recently released data\n    market_impact: upcomingEvents.some(e => e.importance === 'high') ? 'significant' : 'moderate'\n  };\n}\n\n// Function to determine the current market regime\nfunction determineMarketRegime(technicalAnalysis, sentimentData) {\n  // Use the 1h timeframe as a reference\n  const hourlyAnalysis = technicalAnalysis['1h'] || technicalAnalysis[Object.keys(technicalAnalysis)[0]];\n  \n  // Check for trending or ranging market\n  const isTrending = hourlyAnalysis.marketStructure.trend !== 'ranging';\n  \n  // Check for high volatility\n  const isHighVolatility = hourlyAnalysis.volatility > 15; // Threshold for high volatility\n  \n  // Check for strong sentiment\n  const isStrongSentiment = sentimentData.overall !== 'neutral' && \n                           Math.abs(sentimentData.scores.bullish - sentimentData.scores.bearish) > 20;\n  \n  // Determine regime\n  let regime;\n  if (isTrending) {\n    if (hourlyAnalysis.marketStructure.trend === 'uptrend') {\n      regime = isHighVolatility ? 'strong_uptrend' : 'moderate_uptrend';\n    } else {\n      regime = isHighVolatility ? 'strong_downtrend' : 'moderate_downtrend';\n    }\n  } else {\n    regime = isHighVolatility ? 'volatile_range' : 'stable_range';\n  }\n  \n  // Add sentiment bias\n  let sentimentBias;\n  if (sentimentData.overall === 'bullish') {\n    sentimentBias = 'bullish_bias';\n  } else if (sentimentData.overall === 'bearish') {\n    sentimentBias = 'bearish_bias';\n  } else {\n    sentimentBias = 'neutral_bias';\n  }\n  \n  return {\n    regime,\n    sentimentBias,\n    volatility: isHighVolatility ? 'high' : 'normal',\n    trending: isTrending,\n    optimal_strategy: determineOptimalStrategy(regime, sentimentBias)\n  };\n}\n\n// Function to determine the optimal trading strategy based on market regime\nfunction determineOptimalStrategy(regime, sentimentBias) {\n  switch (regime) {\n    case 'strong_uptrend':\n      return 'trend_following_long';\n    case 'moderate_uptrend':\n      return sentimentBias === 'bullish_bias' ? 'trend_following_long' : 'wait_for_pullback';\n    case 'strong_downtrend':\n      return 'trend_following_short';\n    case 'moderate_downtrend':\n      return sentimentBias === 'bearish_bias' ? 'trend_following_short' : 'wait_for_pullback';\n    case 'volatile_range':\n      return 'breakout_strategy';\n    case 'stable_range':\n      return 'mean_reversion';\n    default:\n      return 'wait_and_see';\n  }\n}\n\nreturn {\n  json: combinedAnalysis\n};"
+      },
+      "name": "Multi-Dimensional Analysis",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "apiKey",
+        "apiKey": "{{$node[\"Set OpenAI API Key\"].json[\"apiKey\"]}}",
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4-turbo",
+        "prompt": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are an advanced AI trading analyst with expertise in forex and gold markets. You have decades of experience in technical analysis, market structure, sentiment analysis, and intermarket correlations. Your analysis should be precise, actionable, and focused on high-probability setups. You should think like a professional trader who understands market dynamics at a deep level.\n\nYour analysis should include:\n1. Clear market structure assessment\n2. Multi-timeframe analysis\n3. Key support and resistance levels\n4. Sentiment and correlation insights\n5. Specific entry, stop loss, and take profit levels\n6. Risk management recommendations\n7. Confidence level in the trade setup\n\nYour recommendations should be practical, consider risk management principles, and provide a comprehensive view of the market."
+            },
+            {
+              "role": "user",
+              "content": "=== COMPREHENSIVE MARKET ANALYSIS ===\nSymbol: {{$json[\"symbol\"]}}\nTimestamp: {{$json[\"timestamp\"]}}\n\n=== MARKET REGIME ===\nRegime: {{$json[\"marketRegime\"][\"regime\"]}}\nSentiment Bias: {{$json[\"marketRegime\"][\"sentimentBias\"]}}\nVolatility: {{$json[\"marketRegime\"][\"volatility\"]}}\nTrending: {{$json[\"marketRegime\"][\"trending\"]}}\nOptimal Strategy: {{$json[\"marketRegime\"][\"optimal_strategy\"]}}\n\n=== MULTI-TIMEFRAME TECHNICAL ANALYSIS ===\n{% for timeframe, analysis in $json[\"technicalAnalysis\"] %}\n--- {{timeframe}} Timeframe ---\nRSI: {{analysis.rsi}}\nMA Status: SMA20 = {{analysis.sma.sma20}}, SMA50 = {{analysis.sma.sma50}}, SMA200 = {{analysis.sma.sma200}}\nMACD: Line = {{analysis.macd.macdLine}}, Signal = {{analysis.macd.signalLine}}, Histogram = {{analysis.macd.histogram}}\nBollinger Bands: Upper = {{analysis.bollingerBands.upper}}, Middle = {{analysis.bollingerBands.middle}}, Lower = {{analysis.bollingerBands.lower}}\nMarket Structure: {{analysis.marketStructure.trend}} (Higher Highs: {{analysis.marketStructure.higherHighs}}, Higher Lows: {{analysis.marketStructure.higherLows}})\nSupport Levels: {{analysis.supportResistance.support}}\nResistance Levels: {{analysis.supportResistance.resistance}}\nVolatility (ATR): {{analysis.atr}}\nKey Patterns: {% for pattern in analysis.patterns %}{{pattern.type}} ({{pattern.confidence}}){% if not loop.last %}, {% endif %}{% endfor %}\n\n{% endfor %}\n\n=== SENTIMENT ANALYSIS ===\nOverall Sentiment: {{$json[\"sentimentAnalysis\"][\"overall\"]}}\nBullish Score: {{$json[\"sentimentAnalysis\"][\"scores\"][\"bullish\"]}}\nBearish Score: {{$json[\"sentimentAnalysis\"][\"scores\"][\"bearish\"]}}\nNeutral Score: {{$json[\"sentimentAnalysis\"][\"scores\"][\"neutral\"]}}\nInstitutional Positioning: {{$json[\"sentimentAnalysis\"][\"institutional_positioning\"]}}\n\nRecent News:\n{% for news in $json[\"sentimentAnalysis\"][\"news\"][\"recent_news\"] %}\n- {{news.title}} ({{news.sentiment}}) - {{news.source}}\n{% endfor %}\n\n=== CORRELATION ANALYSIS ===\nCorrelations:\n{% for market, correlation in $json[\"correlationAnalysis\"][\"correlations\"] %}\n- {{market}}: {{correlation}}\n{% endfor %}\nStrongest Correlation: {{$json[\"correlationAnalysis\"][\"strongest_correlation\"]}}\nCorrelation Impact: {{$json[\"correlationAnalysis\"][\"correlation_impact\"]}}\n\n=== ECONOMIC EVENTS ===\nUpcoming Events:\n{% for event in $json[\"economicEvents\"][\"upcoming_events\"] %}\n- {{event.date}}: {{event.economy}} {{event.event}} (Importance: {{event.importance}})\n{% endfor %}\nMarket Impact: {{$json[\"economicEvents\"][\"market_impact\"]}}\n\nBased on this comprehensive analysis, provide a professional trading assessment with the following:\n1. Executive summary of the current market situation\n2. Multi-timeframe trend analysis\n3. Key support and resistance levels with strength assessment\n4. Highest probability trade setup with specific entry, stop loss, and take profit levels\n5. Alternative scenarios to watch for\n6. Risk management recommendations\n7. Confidence level in the primary trade setup\n\nFormat your response as a JSON object with the following structure:\n{\n  \"executive_summary\": \"Brief overview of the current market situation\",\n  \"multi_timeframe_analysis\": {\n    \"primary_trend\": \"uptrend/downtrend/ranging\",\n    \"timeframe_alignment\": \"aligned/mixed/conflicting\",\n    \"key_observations\": \"Important observations across timeframes\"\n  },\n  \"key_levels\": {\n    \"strong_resistance\": [level1, level2],\n    \"strong_support\": [level1, level2],\n    \"level_assessment\": \"Brief assessment of the key levels\"\n  },\n  \"primary_trade_setup\": {\n    \"direction\": \"buy/sell/none\",\n    \"setup_type\": \"trend_continuation/reversal/breakout/range/none\",\n    \"entry\": entry_price_or_zone,\n    \"stop_loss\": stop_loss_level,\n    \"take_profit\": [tp1, tp2, tp3],\n    \"risk_reward\": risk_reward_ratio,\n    \"timeframe\": \"best_timeframe_for_execution\"\n  },\n  \"alternative_scenarios\": [\n    {\n      \"scenario\": \"Description of alternative scenario\",\n      \"trigger\": \"What would trigger this scenario\",\n      \"action\": \"What action to take if triggered\"\n    }\n  ],\n  \"risk_management\": {\n    \"position_size\": \"Recommendation on position sizing\",\n    \"max_risk_percent\": recommended_risk_percentage,\n    \"market_conditions_warning\": \"Any warnings about current market conditions\"\n  },\n  \"confidence\": confidence_percentage,\n  \"analysis_summary\": \"Comprehensive explanation of your reasoning\"\n}"
+            }
+          ]
+        },
+        "options": {
+          "responseFormat": {
+            "type": "json_object"
+          }
+        }
+      },
+      "name": "Generate AGI Trading Signal",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Get the trading signal and original analysis data\nconst tradingSignal = $input.item.json;\nconst symbol = tradingSignal.primary_trade_setup ? tradingSignal.primary_trade_setup.direction : 'none';\n\n// Create a more user-friendly HTML format for Telegram\nconst telegramMessage = `\n🤖 <b>AGI FOREX TRADING INTELLIGENCE</b> 🤖\n\n🪙 <b>${$input.item.json.symbol}</b>\n⏰ ${new Date().toISOString().replace('T', ' ').substring(0, 19)}\n\n📊 <b>EXECUTIVE SUMMARY:</b>\n${tradingSignal.executive_summary}\n\n📈 <b>TREND ANALYSIS:</b>\n• Primary Trend: ${tradingSignal.multi_timeframe_analysis.primary_trend}\n• Timeframe Alignment: ${tradingSignal.multi_timeframe_analysis.timeframe_alignment}\n• Key Observations: ${tradingSignal.multi_timeframe_analysis.key_observations}\n\n🎯 <b>KEY LEVELS:</b>\n• Strong Resistance: ${tradingSignal.key_levels.strong_resistance.join(', ')}\n• Strong Support: ${tradingSignal.key_levels.strong_support.join(', ')}\n• Assessment: ${tradingSignal.key_levels.level_assessment}\n\n⚡ <b>PRIMARY TRADE SETUP:</b>\n• Direction: ${tradingSignal.primary_trade_setup.direction}\n• Setup Type: ${tradingSignal.primary_trade_setup.setup_type}\n• Entry: ${tradingSignal.primary_trade_setup.entry}\n• Stop Loss: ${tradingSignal.primary_trade_setup.stop_loss}\n• Take Profit: ${tradingSignal.primary_trade_setup.take_profit.join(', ')}\n• Risk/Reward: ${tradingSignal.primary_trade_setup.risk_reward}\n• Timeframe: ${tradingSignal.primary_trade_setup.timeframe}\n\n🔄 <b>ALTERNATIVE SCENARIOS:</b>\n${tradingSignal.alternative_scenarios.map(scenario => `• ${scenario.scenario} (Trigger: ${scenario.trigger})`).join('\\n')}\n\n⚖️ <b>RISK MANAGEMENT:</b>\n• Position Size: ${tradingSignal.risk_management.position_size}\n• Max Risk: ${tradingSignal.risk_management.max_risk_percent}%\n• Warning: ${tradingSignal.risk_management.market_conditions_warning}\n\n🎯 <b>CONFIDENCE:</b> ${tradingSignal.confidence}%\n\n💡 <b>ANALYSIS SUMMARY:</b>\n${tradingSignal.analysis_summary}\n`;\n\n// Add the trading signal to a database or tracking system\nconst signalRecord = {\n  symbol: $input.item.json.symbol,\n  timestamp: new Date().toISOString(),\n  signal: tradingSignal.primary_trade_setup.direction,\n  entry: tradingSignal.primary_trade_setup.entry,\n  stopLoss: tradingSignal.primary_trade_setup.stop_loss,\n  takeProfit: tradingSignal.primary_trade_setup.take_profit,\n  confidence: tradingSignal.confidence,\n  telegramMessage\n};\n\nreturn {\n  json: signalRecord\n};"
+      },
+      "name": "Format Signal for Delivery",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "{{$node[\"Set Telegram Chat ID\"].json[\"chatId\"]}}",
+        "text": "={{$json[\"telegramMessage\"]}}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "name": "Send Telegram Signal",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram_bot_api",
+          "name": "Telegram Bot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "apiKey",
+              "value": "your-openai-api-key"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set OpenAI API Key",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        240,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "chatId",
+              "value": "your-telegram-chat-id"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set Telegram Chat ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        460,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.yourdatabase.com/trading-signals",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "signal",
+              "value": "={{ $json }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Save to Database",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        2000,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Initialize a self-learning system that tracks and improves signal accuracy\n\n// In a real implementation, this would:\n// 1. Store the current signal in a database\n// 2. Check past signals and their outcomes\n// 3. Adjust the model parameters based on performance\n// 4. Update a performance metrics dashboard\n\n// For this demo, we'll just create a mock implementation\nconst selfLearningSystem = {\n  recordSignal: function(signal) {\n    console.log('Recording signal for future learning:', signal.symbol, signal.signal);\n    return {\n      recorded: true,\n      signalId: `${signal.symbol}_${Date.now()}`,\n      timestamp: new Date().toISOString()\n    };\n  },\n  \n  analyzePerformance: function(symbol) {\n    // Mock performance metrics\n    return {\n      symbol,\n      accuracy: Math.round(Math.random() * 30 + 65), // 65-95% accuracy\n      profitFactor: (Math.random() * 1.5 + 1.2).toFixed(2), // 1.2-2.7 profit factor\n      averageRR: (Math.random() * 1.5 + 1).toFixed(2), // 1.0-2.5 average R:R\n      winRate: Math.round(Math.random() * 25 + 50), // 50-75% win rate\n      totalSignals: Math.round(Math.random() * 50 + 50) // 50-100 signals\n    };\n  },\n  \n  adjustParameters: function(symbol, performance) {\n    // Mock parameter adjustments\n    return {\n      symbol,\n      adjustments: [\n        {\n          parameter: 'rsi_threshold',\n          oldValue: '70/30',\n          newValue: performance.accuracy > 80 ? '70/30' : '65/35',\n          reason: 'Optimizing based on historical performance'\n        },\n        {\n          parameter: 'trend_confirmation',\n          oldValue: 'medium',\n          newValue: performance.winRate > 65 ? 'strict' : 'medium',\n          reason: 'Adjusting to improve win rate'\n        }\n      ],\n      learningRate: 0.05,\n      confidenceInAdjustments: performance.totalSignals > 75 ? 'high' : 'medium'\n    };\n  }\n};\n\n// Process the current signal\nconst signalRecord = $input.item.json;\nconst recordResult = selfLearningSystem.recordSignal(signalRecord);\nconst performanceMetrics = selfLearningSystem.analyzePerformance(signalRecord.symbol);\nconst parameterAdjustments = selfLearningSystem.adjustParameters(signalRecord.symbol, performanceMetrics);\n\n// Combine everything into a learning system report\nconst learningSystemReport = {\n  signalRecord: recordResult,\n  performanceMetrics,\n  parameterAdjustments,\n  nextReviewScheduled: new Date(Date.now() + 86400000).toISOString(), // 24 hours from now\n  systemStatus: 'learning_active'\n};\n\nreturn {\n  json: learningSystemReport\n};"
+      },
+      "name": "Self-Learning System",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        2220,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Analysis Targets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Analysis Targets": {
+      "main": [
+        [
+          {
+            "node": "Process Each Symbol",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Each Symbol": {
+      "main": [
+        [
+          {
+            "node": "Fetch Multi-Timeframe Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Multi-Timeframe Data": {
+      "main": [
+        [
+          {
+            "node": "Perform Technical Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Perform Technical Analysis": {
+      "main": [
+        [
+          {
+            "node": "Multi-Dimensional Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Multi-Dimensional Analysis": {
+      "main": [
+        [
+          {
+            "node": "Generate AGI Trading Signal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate AGI Trading Signal": {
+      "main": [
+        [
+          {
+            "node": "Format Signal for Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Signal for Delivery": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Signal",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Save to Database",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Self-Learning System",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "YOUR_INSTANCE_ID"
+  },
+  "tags": [
+    {
+      "name": "forex",
+      "createdAt": "2025-07-05T01:04:00.000Z",
+      "updatedAt": "2025-07-05T01:04:00.000Z"
+    },
+    {
+      "name": "agi",
+      "createdAt": "2025-07-05T01:04:00.000Z",
+      "updatedAt": "2025-07-05T01:04:00.000Z"
+    },
+    {
+      "name": "trading",
+      "createdAt": "2025-07-05T01:04:00.000Z",
+      "updatedAt": "2025-07-05T01:04:00.000Z"
+    }
+  ]
+}

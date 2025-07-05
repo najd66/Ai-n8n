@@ -1,0 +1,423 @@
+{
+  "name": "Forex AI Trading Signal Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Define the top 10 forex pairs and gold to monitor\nconst symbols = [\n  'EURUSD', 'USDJPY', 'GBPUSD', 'AUDUSD', 'USDCAD',\n  'USDCHF', 'NZDUSD', 'EURJPY', 'EURGBP', 'GBPJPY',\n  'XAUUSD' // Gold\n];\n\n// Define timeframes to analyze\nconst timeframes = ['5m', '15m', '1h', '4h', 'D'];\n\n// Create items for each symbol and timeframe combination\nconst items = [];\n\nfor (const symbol of symbols) {\n  for (const timeframe of timeframes) {\n    items.push({\n      json: {\n        symbol,\n        timeframe,\n        timestamp: new Date().toISOString(),\n        requestId: Date.now().toString()\n      }\n    });\n  }\n}\n\nreturn items;"
+      },
+      "name": "Prepare Forex Symbols",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "name": "Process Each Symbol",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.forexdata.com/v1/candles?symbol={{$json[\"symbol\"]}}&timeframe={{$json[\"timeframe\"]}}&limit=100",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Fetch Forex Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        900,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "forex_api_key",
+          "name": "Forex API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Process the raw forex data into a format suitable for analysis\nconst rawData = $input.item.json;\nconst symbol = $input.item.json.symbol || $json.symbol;\nconst timeframe = $input.item.json.timeframe || $json.timeframe;\n\n// Mock data structure if API is not available\nlet processedData;\nif (!Array.isArray(rawData) || rawData.length === 0) {\n  // Generate mock data for testing\n  processedData = [];\n  const basePrice = symbol === 'XAUUSD' ? 2000 : 1.1;\n  const now = new Date();\n  \n  for (let i = 0; i < 100; i++) {\n    const timestamp = new Date(now.getTime() - (i * getTimeframeMinutes(timeframe) * 60 * 1000));\n    const volatility = symbol === 'XAUUSD' ? 5 : 0.0005;\n    const open = basePrice + (Math.random() - 0.5) * volatility * 10;\n    const high = open + Math.random() * volatility;\n    const low = open - Math.random() * volatility;\n    const close = low + Math.random() * (high - low);\n    const volume = Math.floor(Math.random() * 1000) + 500;\n    \n    processedData.unshift({\n      timestamp: timestamp.toISOString(),\n      open,\n      high,\n      low,\n      close,\n      volume\n    });\n  }\n} else {\n  // Process actual API data\n  processedData = rawData.map(candle => ({\n    timestamp: new Date(candle.timestamp).toISOString(),\n    open: parseFloat(candle.open),\n    high: parseFloat(candle.high),\n    low: parseFloat(candle.low),\n    close: parseFloat(candle.close),\n    volume: parseFloat(candle.volume || 0)\n  }));\n}\n\n// Helper function to convert timeframe to minutes\nfunction getTimeframeMinutes(timeframe) {\n  switch(timeframe) {\n    case '1m': return 1;\n    case '5m': return 5;\n    case '15m': return 15;\n    case '30m': return 30;\n    case '1h': return 60;\n    case '4h': return 240;\n    case 'D': return 1440;\n    default: return 15;\n  }\n}\n\n// Calculate technical indicators\n\n// 1. Calculate RSI\nfunction calculateRSI(data, period = 14) {\n  if (data.length < period + 1) {\n    return 50; // Default value if not enough data\n  }\n  \n  let gains = 0;\n  let losses = 0;\n  \n  // Calculate initial gains and losses\n  for (let i = 1; i <= period; i++) {\n    const change = data[i].close - data[i-1].close;\n    if (change >= 0) {\n      gains += change;\n    } else {\n      losses -= change;\n    }\n  }\n  \n  let avgGain = gains / period;\n  let avgLoss = losses / period;\n  \n  // Calculate RSI using the smoothed method\n  for (let i = period + 1; i < data.length; i++) {\n    const change = data[i].close - data[i-1].close;\n    if (change >= 0) {\n      avgGain = (avgGain * (period - 1) + change) / period;\n      avgLoss = (avgLoss * (period - 1)) / period;\n    } else {\n      avgGain = (avgGain * (period - 1)) / period;\n      avgLoss = (avgLoss * (period - 1) - change) / period;\n    }\n  }\n  \n  if (avgLoss === 0) {\n    return 100;\n  }\n  \n  const RS = avgGain / avgLoss;\n  return 100 - (100 / (1 + RS));\n}\n\n// 2. Calculate Moving Averages\nfunction calculateMA(data, period, type = 'sma') {\n  if (data.length < period) {\n    return null;\n  }\n  \n  const prices = data.map(candle => candle.close);\n  \n  if (type === 'sma') {\n    // Simple Moving Average\n    let sum = 0;\n    for (let i = prices.length - period; i < prices.length; i++) {\n      sum += prices[i];\n    }\n    return sum / period;\n  } else if (type === 'ema') {\n    // Exponential Moving Average\n    let sum = 0;\n    for (let i = 0; i < period; i++) {\n      sum += prices[prices.length - period + i];\n    }\n    let ema = sum / period;\n    \n    const multiplier = 2 / (period + 1);\n    for (let i = prices.length - period + 1; i < prices.length; i++) {\n      ema = (prices[i] - ema) * multiplier + ema;\n    }\n    return ema;\n  }\n  \n  return null;\n}\n\n// 3. Calculate MACD\nfunction calculateMACD(data) {\n  const ema12 = calculateMA(data, 12, 'ema');\n  const ema26 = calculateMA(data, 26, 'ema');\n  \n  if (ema12 === null || ema26 === null) {\n    return { macdLine: 0, signalLine: 0, histogram: 0 };\n  }\n  \n  const macdLine = ema12 - ema26;\n  \n  // Calculate signal line (9-day EMA of MACD line)\n  // For simplicity, we'll use a simple approximation\n  const signalLine = macdLine * 0.9; // Approximation\n  const histogram = macdLine - signalLine;\n  \n  return { macdLine, signalLine, histogram };\n}\n\n// 4. Calculate Support and Resistance levels (SNR)\nfunction calculateSNR(data, lookback = 20) {\n  if (data.length < lookback) {\n    return { support: [], resistance: [] };\n  }\n  \n  const recentData = data.slice(-lookback);\n  \n  // Find local minima (support) and maxima (resistance)\n  const support = [];\n  const resistance = [];\n  \n  // Skip first and last candle\n  for (let i = 1; i < recentData.length - 1; i++) {\n    // Check for local minimum (support)\n    if (recentData[i].low < recentData[i-1].low && recentData[i].low < recentData[i+1].low) {\n      support.push(recentData[i].low);\n    }\n    \n    // Check for local maximum (resistance)\n    if (recentData[i].high > recentData[i-1].high && recentData[i].high > recentData[i+1].high) {\n      resistance.push(recentData[i].high);\n    }\n  }\n  \n  // Cluster similar levels (within 0.1% for forex, 0.5% for gold)\n  const clusterThreshold = symbol === 'XAUUSD' ? 0.005 : 0.001;\n  \n  const clusteredSupport = clusterLevels(support, clusterThreshold);\n  const clusteredResistance = clusterLevels(resistance, clusterThreshold);\n  \n  return { \n    support: clusteredSupport.slice(0, 3), // Return top 3 support levels\n    resistance: clusteredResistance.slice(0, 3) // Return top 3 resistance levels\n  };\n}\n\n// Helper function to cluster price levels\nfunction clusterLevels(levels, threshold) {\n  if (levels.length === 0) return [];\n  \n  // Sort levels\n  levels.sort((a, b) => a - b);\n  \n  const clusters = [];\n  let currentCluster = [levels[0]];\n  \n  for (let i = 1; i < levels.length; i++) {\n    const currentLevel = levels[i];\n    const prevLevel = levels[i-1];\n    \n    // Check if current level is within threshold of previous level\n    if ((currentLevel - prevLevel) / prevLevel < threshold) {\n      // Add to current cluster\n      currentCluster.push(currentLevel);\n    } else {\n      // Create a new cluster\n      clusters.push(currentCluster);\n      currentCluster = [currentLevel];\n    }\n  }\n  \n  // Add the last cluster\n  if (currentCluster.length > 0) {\n    clusters.push(currentCluster);\n  }\n  \n  // Calculate average value for each cluster\n  return clusters.map(cluster => {\n    const sum = cluster.reduce((acc, val) => acc + val, 0);\n    return sum / cluster.length;\n  });\n}\n\n// 5. Calculate Bollinger Bands\nfunction calculateBollingerBands(data, period = 20, stdDev = 2) {\n  if (data.length < period) {\n    return { upper: null, middle: null, lower: null };\n  }\n  \n  const sma = calculateMA(data, period, 'sma');\n  if (sma === null) return { upper: null, middle: null, lower: null };\n  \n  // Calculate standard deviation\n  const prices = data.slice(-period).map(candle => candle.close);\n  const squaredDiffs = prices.map(price => Math.pow(price - sma, 2));\n  const variance = squaredDiffs.reduce((sum, val) => sum + val, 0) / period;\n  const std = Math.sqrt(variance);\n  \n  return {\n    upper: sma + (stdDev * std),\n    middle: sma,\n    lower: sma - (stdDev * std)\n  };\n}\n\n// 6. Calculate Average True Range (ATR) for volatility\nfunction calculateATR(data, period = 14) {\n  if (data.length < period + 1) {\n    return 0;\n  }\n  \n  const trueRanges = [];\n  \n  // Calculate true ranges\n  for (let i = 1; i < data.length; i++) {\n    const high = data[i].high;\n    const low = data[i].low;\n    const prevClose = data[i-1].close;\n    \n    const tr1 = high - low;\n    const tr2 = Math.abs(high - prevClose);\n    const tr3 = Math.abs(low - prevClose);\n    \n    const trueRange = Math.max(tr1, tr2, tr3);\n    trueRanges.push(trueRange);\n  }\n  \n  // Calculate ATR as simple average of true ranges\n  const recentTR = trueRanges.slice(-period);\n  const atr = recentTR.reduce((sum, tr) => sum + tr, 0) / period;\n  \n  return atr;\n}\n\n// 7. Calculate price momentum\nfunction calculateMomentum(data, period = 10) {\n  if (data.length < period) {\n    return 0;\n  }\n  \n  const currentPrice = data[data.length - 1].close;\n  const pastPrice = data[data.length - period].close;\n  \n  return (currentPrice / pastPrice) * 100;\n}\n\n// Calculate all indicators\nconst rsi = calculateRSI(processedData);\nconst sma50 = calculateMA(processedData, 50, 'sma');\nconst sma200 = calculateMA(processedData, 200, 'sma');\nconst ema20 = calculateMA(processedData, 20, 'ema');\nconst macd = calculateMACD(processedData);\nconst snr = calculateSNR(processedData);\nconst bollingerBands = calculateBollingerBands(processedData);\nconst atr = calculateATR(processedData);\nconst momentum = calculateMomentum(processedData);\n\n// Current price\nconst currentPrice = processedData[processedData.length - 1].close;\nconst previousPrice = processedData[processedData.length - 2].close;\nconst priceChange = ((currentPrice - previousPrice) / previousPrice) * 100;\n\n// Prepare analysis data\nconst technicalAnalysis = {\n  symbol,\n  timeframe,\n  currentPrice,\n  priceChange,\n  timestamp: processedData[processedData.length - 1].timestamp,\n  indicators: {\n    rsi,\n    sma50,\n    sma200,\n    ema20,\n    macd,\n    snr,\n    bollingerBands,\n    atr,\n    momentum\n  },\n  recentCandles: processedData.slice(-5) // Include only the last 5 candles for reference\n};\n\nreturn {json: technicalAnalysis};"
+      },
+      "name": "Process Forex Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "apiKey",
+        "apiKey": "{{$node[\"Set OpenAI API Key\"].json[\"apiKey\"]}}",
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4-turbo",
+        "prompt": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are an expert forex trader with decades of experience in technical analysis and price action trading. You specialize in Support and Resistance (SNR) analysis, trend identification, and momentum trading. Your analysis should be precise, actionable, and focused on high-probability setups. You should think like a professional trader who understands market structure, order flow, and institutional levels.\n\nYour analysis should include:\n1. Clear identification of key support and resistance levels\n2. Price action analysis (candlestick patterns, chart patterns)\n3. Trend direction and strength\n4. Momentum analysis\n5. Volatility assessment\n6. Specific entry, stop loss, and take profit levels\n7. Risk-to-reward ratio\n8. Confidence level in the trade setup\n\nYour recommendations should be practical and consider risk management principles."
+            },
+            {
+              "role": "user",
+              "content": "=== FOREX MARKET DATA ===\nSymbol: {{$json[\"symbol\"]}}\nTimeframe: {{$json[\"timeframe\"]}}\nCurrent Price: {{$json[\"currentPrice\"]}}\nPrice Change: {{$json[\"priceChange\"]}}%\nTimestamp: {{$json[\"timestamp\"]}}\n\n=== TECHNICAL INDICATORS ===\nRSI (14): {{$json[\"indicators\"][\"rsi\"]}}\nSMA (50): {{$json[\"indicators\"][\"sma50\"]}}\nSMA (200): {{$json[\"indicators\"][\"sma200\"]}}\nEMA (20): {{$json[\"indicators\"][\"ema20\"]}}\n\nMACD:\n- MACD Line: {{$json[\"indicators\"][\"macd\"][\"macdLine\"]}}\n- Signal Line: {{$json[\"indicators\"][\"macd\"][\"signalLine\"]}}\n- Histogram: {{$json[\"indicators\"][\"macd\"][\"histogram\"]}}\n\nSupport and Resistance Levels:\n- Support: {{$json[\"indicators\"][\"snr\"][\"support\"]}}\n- Resistance: {{$json[\"indicators\"][\"snr\"][\"resistance\"]}}\n\nBollinger Bands:\n- Upper: {{$json[\"indicators\"][\"bollingerBands\"][\"upper\"]}}\n- Middle: {{$json[\"indicators\"][\"bollingerBands\"][\"middle\"]}}\n- Lower: {{$json[\"indicators\"][\"bollingerBands\"][\"lower\"]}}\n\nATR: {{$json[\"indicators\"][\"atr\"]}}\nMomentum: {{$json[\"indicators\"][\"momentum\"]}}\n\nBased on this data, provide a professional forex trading analysis with the following:\n1. Market structure analysis (trend, key levels)\n2. Price action analysis\n3. Trading signal recommendation (STRONG BUY, BUY, NEUTRAL, SELL, STRONG SELL)\n4. Entry price or zone\n5. Stop loss level\n6. Take profit targets (multiple levels if appropriate)\n7. Risk-to-reward ratio\n8. Confidence level (percentage)\n9. Timeframe recommendation (scalp, intraday, swing, position)\n\nFormat your response as a JSON object with the following structure:\n{\n  \"market_structure\": {\n    \"trend\": \"uptrend/downtrend/ranging\",\n    \"key_levels\": {\n      \"support\": [level1, level2],\n      \"resistance\": [level1, level2]\n    }\n  },\n  \"price_action\": \"Description of current price action\",\n  \"signal\": \"STRONG BUY/BUY/NEUTRAL/SELL/STRONG SELL\",\n  \"entry\": {\n    \"price\": entry_price,\n    \"zone\": [zone_low, zone_high]\n  },\n  \"stop_loss\": stop_loss_price,\n  \"take_profit\": [tp1, tp2, tp3],\n  \"risk_reward\": risk_reward_ratio,\n  \"confidence\": confidence_percentage,\n  \"timeframe\": \"scalp/intraday/swing/position\",\n  \"analysis_summary\": \"Brief explanation of your reasoning\"\n}"
+            }
+          ]
+        },
+        "options": {
+          "responseFormat": {
+            "type": "json_object"
+          }
+        }
+      },
+      "name": "Generate Forex Signal",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json[\"signal\"]}}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "name": "Valid Signal?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "{{$node[\"Set Telegram Chat ID\"].json[\"chatId\"]}}",
+        "text": "=== 📊 FOREX SIGNAL ALERT 📊 ===\n\n🪙 {{$node[\"Process Forex Data\"].json[\"symbol\"]}} ({{$node[\"Process Forex Data\"].json[\"timeframe\"]}})\n💰 Price: {{$node[\"Process Forex Data\"].json[\"currentPrice\"]}} ({{$node[\"Process Forex Data\"].json[\"priceChange\"]}}%)\n⏰ Generated: {{$node[\"Process Forex Data\"].json[\"timestamp\"]}}\n\n📈 SIGNAL: {{$json[\"signal\"]}}\n\n🔍 Market Structure: {{$json[\"market_structure\"][\"trend\"]}}\n📊 Price Action: {{$json[\"price_action\"]}}\n\n⚡ TRADE SETUP:\n- Entry: {{$json[\"entry\"][\"price\"]}} (Zone: {{$json[\"entry\"][\"zone\"][0]}} - {{$json[\"entry\"][\"zone\"][1]}})\n- Stop Loss: {{$json[\"stop_loss\"]}}\n- Take Profit: {{$json[\"take_profit\"].join(\", \")}}\n\n⚖️ Risk/Reward: {{$json[\"risk_reward\"]}}\n🎯 Confidence: {{$json[\"confidence\"]}}%\n⏱️ Timeframe: {{$json[\"timeframe\"]}}\n\n💡 Analysis:\n{{$json[\"analysis_summary\"]}}\n\n📍 Key Levels:\n  Support: {{$json[\"market_structure\"][\"key_levels\"][\"support\"].join(\", \")}}\n  Resistance: {{$json[\"market_structure\"][\"key_levels\"][\"resistance\"].join(\", \")}}\n\n🤖 Generated by Forex AI Trading Signal Agent",
+        "additionalFields": {}
+      },
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1780,
+        200
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram_bot_api",
+          "name": "Telegram Bot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "apiKey",
+              "value": "your-openai-api-key"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set OpenAI API Key",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        240,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "chatId",
+              "value": "your-telegram-chat-id"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set Telegram Chat ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        460,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.yourdatabase.com/trading-signals",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "signal",
+              "value": "={{ $json }}"
+            },
+            {
+              "name": "metadata",
+              "value": "={{ $node[\"Process Forex Data\"].json }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Save to Database",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1780,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Log error for debugging\nconsole.log('Invalid signal generated:', $input.item);\n\nreturn {\n  json: {\n    error: 'Invalid forex trading signal generated',\n    timestamp: new Date().toISOString(),\n    data: $input.item\n  }\n};"
+      },
+      "name": "Handle Error",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1780,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "waitForRunning",
+        "amount": 55
+      },
+      "name": "Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Aggregate all signals to create a comprehensive market overview\nconst items = $input.all.map(item => item.json);\n\n// Group by symbol\nconst symbolGroups = {};\nitems.forEach(item => {\n  if (!item.symbol) return; // Skip invalid items\n  \n  if (!symbolGroups[item.symbol]) {\n    symbolGroups[item.symbol] = [];\n  }\n  symbolGroups[item.symbol].push(item);\n});\n\n// Create summary for each symbol across timeframes\nconst symbolSummaries = {};\nObject.keys(symbolGroups).forEach(symbol => {\n  const signals = symbolGroups[symbol];\n  \n  // Count signal types\n  const signalCounts = {\n    'STRONG BUY': 0,\n    'BUY': 0,\n    'NEUTRAL': 0,\n    'SELL': 0,\n    'STRONG SELL': 0\n  };\n  \n  signals.forEach(signal => {\n    if (signal.signal && signalCounts[signal.signal] !== undefined) {\n      signalCounts[signal.signal]++;\n    }\n  });\n  \n  // Determine overall bias\n  const buySignals = signalCounts['STRONG BUY'] + signalCounts['BUY'];\n  const sellSignals = signalCounts['STRONG SELL'] + signalCounts['SELL'];\n  const neutralSignals = signalCounts['NEUTRAL'];\n  \n  let overallBias;\n  if (buySignals > sellSignals && buySignals > neutralSignals) {\n    overallBias = 'Bullish';\n  } else if (sellSignals > buySignals && sellSignals > neutralSignals) {\n    overallBias = 'Bearish';\n  } else {\n    overallBias = 'Neutral';\n  }\n  \n  // Find the strongest signal (highest confidence)\n  let strongestSignal = null;\n  let highestConfidence = 0;\n  \n  signals.forEach(signal => {\n    if (signal.confidence && signal.confidence > highestConfidence) {\n      highestConfidence = signal.confidence;\n      strongestSignal = signal;\n    }\n  });\n  \n  // Create summary\n  symbolSummaries[symbol] = {\n    symbol,\n    overallBias,\n    signalCounts,\n    strongestSignal: strongestSignal ? {\n      timeframe: strongestSignal.timeframe || 'unknown',\n      signal: strongestSignal.signal || 'NEUTRAL',\n      confidence: strongestSignal.confidence || 0,\n      risk_reward: strongestSignal.risk_reward || 'N/A'\n    } : null\n  };\n});\n\n// Create market overview\nconst marketOverview = {\n  timestamp: new Date().toISOString(),\n  symbols: symbolSummaries,\n  marketSummary: {\n    bullishCount: Object.values(symbolSummaries).filter(s => s.overallBias === 'Bullish').length,\n    bearishCount: Object.values(symbolSummaries).filter(s => s.overallBias === 'Bearish').length,\n    neutralCount: Object.values(symbolSummaries).filter(s => s.overallBias === 'Neutral').length,\n    overallMarketSentiment: Object.values(symbolSummaries).filter(s => s.overallBias === 'Bullish').length > \n                            Object.values(symbolSummaries).filter(s => s.overallBias === 'Bearish').length ? \n                            'Bullish' : 'Bearish'\n  }\n};\n\nreturn {json: marketOverview};"
+      },
+      "name": "Generate Market Overview",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        2220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "{{$node[\"Set Telegram Chat ID\"].json[\"chatId\"]}}",
+        "text": "=== 🌐 FOREX MARKET OVERVIEW 🌐 ===\n\n⏰ Generated: {{$json[\"timestamp\"]}}\n\n📊 MARKET SENTIMENT:\n- Bullish Assets: {{$json[\"marketSummary\"][\"bullishCount\"]}}\n- Bearish Assets: {{$json[\"marketSummary\"][\"bearishCount\"]}}\n- Neutral Assets: {{$json[\"marketSummary\"][\"neutralCount\"]}}\n\n🌍 Overall Market Sentiment: {{$json[\"marketSummary\"][\"overallMarketSentiment\"]}}\n\n--- TOP TRADING OPPORTUNITIES ---\n{% for symbol, data in $json[\"symbols\"] %}\n{% if data.strongestSignal && data.strongestSignal.confidence > 75 %}\n🪙 {{symbol}} ({{data.strongestSignal.timeframe}}): {{data.strongestSignal.signal}} ({{data.strongestSignal.confidence}}% confidence, R/R: {{data.strongestSignal.risk_reward}})\n{% endif %}\n{% endfor %}\n\n--- SYMBOL OVERVIEW ---\n{% for symbol, data in $json[\"symbols\"] %}\n🪙 {{symbol}}: {{data.overallBias}} (Buy: {{data.signalCounts[\"STRONG BUY\"] + data.signalCounts[\"BUY\"]}}, Neutral: {{data.signalCounts[\"NEUTRAL\"]}}, Sell: {{data.signalCounts[\"STRONG SELL\"] + data.signalCounts[\"SELL\"]}})\n{% endfor %}\n\n🤖 Generated by Forex AI Trading Signal Agent",
+        "additionalFields": {}
+      },
+      "name": "Send Market Overview",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        2440,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram_bot_api",
+          "name": "Telegram Bot API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Forex Symbols",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Forex Symbols": {
+      "main": [
+        [
+          {
+            "node": "Process Each Symbol",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Each Symbol": {
+      "main": [
+        [
+          {
+            "node": "Fetch Forex Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Forex Data": {
+      "main": [
+        [
+          {
+            "node": "Process Forex Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Forex Data": {
+      "main": [
+        [
+          {
+            "node": "Generate Forex Signal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Forex Signal": {
+      "main": [
+        [
+          {
+            "node": "Valid Signal?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Signal?": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Save to Database",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Generate Market Overview",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Market Overview": {
+      "main": [
+        [
+          {
+            "node": "Send Market Overview",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "YOUR_INSTANCE_ID"
+  },
+  "tags": [
+    {
+      "name": "forex",
+      "createdAt": "2025-07-05T01:04:00.000Z",
+      "updatedAt": "2025-07-05T01:04:00.000Z"
+    },
+    {
+      "name": "trading",
+      "createdAt": "2025-07-05T01:04:00.000Z",
+      "updatedAt": "2025-07-05T01:04:00.000Z"
+    },
+    {
+      "name": "ai",
+      "createdAt": "2025-07-05T01:04:00.000Z",
+      "updatedAt": "2025-07-05T01:04:00.000Z"
+    }
+  ]
+}

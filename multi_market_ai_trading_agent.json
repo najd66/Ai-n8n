@@ -1,0 +1,371 @@
+{
+  "name": "Multi-Market AI Trading Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "/trading-agent",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "trading-agent-webhook"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract request data\nconst inputData = $input.item.json;\n\n// Default values if not provided\nconst symbols = inputData.symbols || ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];\nconst timeframe = inputData.timeframe || '1h';\nconst analysisType = inputData.analysisType || 'technical';\n\n// Create items for each symbol to process in parallel\nconst items = symbols.map(symbol => {\n  return {\n    json: {\n      symbol,\n      timeframe,\n      analysisType,\n      requestId: inputData.requestId || Date.now().toString(),\n      userId: inputData.userId || 'anonymous'\n    }\n  };\n});\n\nreturn items;"
+      },
+      "name": "Prepare Market Symbols",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "name": "Process Each Symbol",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.binance.com/api/v3/klines?symbol={{$json[\"symbol\"]}}&interval={{$json[\"timeframe\"]}}&limit=100",
+        "options": {}
+      },
+      "name": "Fetch Market Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "ai_trading_signal_agent_template"
+      },
+      "name": "Generate Trading Signal",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json[\"analysisType\"]}}",
+              "value2": "fundamental",
+              "operation": "isEqual"
+            }
+          ]
+        }
+      },
+      "name": "Analysis Type",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "apiKey",
+        "apiKey": "{{$node[\"Set OpenAI API Key\"].json[\"apiKey\"]}}",
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4-turbo",
+        "prompt": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are an expert financial analyst specializing in fundamental analysis. Your task is to analyze market data and news to provide insights on the long-term investment potential of cryptocurrencies or stocks. Focus on factors like project fundamentals, team, adoption metrics, market trends, and recent news."
+            },
+            {
+              "role": "user",
+              "content": "Please provide a fundamental analysis for {{$json[\"symbol\"]}}. Consider recent news, market trends, adoption metrics, and any other relevant fundamental factors.\n\nFormat your response as a JSON object with the following structure:\n{\n  \"symbol\": \"{{$json[\"symbol\"]}}\",\n  \"long_term_outlook\": \"bullish/bearish/neutral\",\n  \"investment_horizon\": \"short/medium/long\",\n  \"key_metrics\": [\"metric1\", \"metric2\"],\n  \"risk_assessment\": \"Low/Medium/High\",\n  \"analysis_summary\": \"Brief explanation of your reasoning\"\n}"
+            }
+          ]
+        },
+        "options": {
+          "responseFormat": {
+            "type": "json_object"
+          }
+        }
+      },
+      "name": "Fundamental Analysis",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "apiKey",
+              "value": "your-openai-api-key"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set OpenAI API Key",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        240,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "mergeByFields": {
+          "values": [
+            {
+              "field1": "symbol",
+              "field2": "symbol"
+            }
+          ]
+        },
+        "options": {
+          "multipleMatches": "first"
+        }
+      },
+      "name": "Combine Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Combine all results into a single report\nconst items = $input.all.map(item => item.json);\n\n// Create a summary report\nconst report = {\n  timestamp: new Date().toISOString(),\n  requestId: items[0].requestId,\n  userId: items[0].userId,\n  signals: items.map(item => {\n    return {\n      symbol: item.symbol,\n      signal: item.signal || 'HOLD',\n      market_sentiment: item.market_sentiment || 'neutral',\n      risk_level: item.risk_level || 'Medium',\n      confidence: item.confidence || 50,\n      analysis_summary: item.analysis_summary || 'No analysis available'\n    };\n  }),\n  summary: {\n    bullish_count: items.filter(item => item.market_sentiment === 'bullish').length,\n    bearish_count: items.filter(item => item.market_sentiment === 'bearish').length,\n    neutral_count: items.filter(item => item.market_sentiment === 'neutral').length,\n    buy_signals: items.filter(item => item.signal === 'BUY').length,\n    sell_signals: items.filter(item => item.signal === 'SELL').length,\n    hold_signals: items.filter(item => item.signal === 'HOLD').length,\n    overall_market_sentiment: items.filter(item => item.market_sentiment === 'bullish').length > items.filter(item => item.market_sentiment === 'bearish').length ? 'bullish' : 'bearish'\n  }\n};\n\nreturn {json: report};"
+      },
+      "name": "Generate Summary Report",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseData": "={{ $json }}",
+        "options": {}
+      },
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "{{$node[\"Set Telegram Chat ID\"].json[\"chatId\"]}}",
+        "text": "=== 📊 MULTI-MARKET TRADING REPORT 📊 ===\n\n⏰ Generated: {{$json[\"timestamp\"]}}\n\n📈 MARKET OVERVIEW:\n- Bullish Assets: {{$json[\"summary\"][\"bullish_count\"]}}\n- Bearish Assets: {{$json[\"summary\"][\"bearish_count\"]}}\n- Neutral Assets: {{$json[\"summary\"][\"neutral_count\"]}}\n\n🔍 SIGNALS SUMMARY:\n- BUY Signals: {{$json[\"summary\"][\"buy_signals\"]}}\n- SELL Signals: {{$json[\"summary\"][\"sell_signals\"]}}\n- HOLD Signals: {{$json[\"summary\"][\"hold_signals\"]}}\n\n🌐 Overall Market Sentiment: {{$json[\"summary\"][\"overall_market_sentiment\"]}}\n\n--- INDIVIDUAL SIGNALS ---\n{% for signal in $json[\"signals\"] %}\n🪙 {{signal.symbol}}: {{signal.signal}} ({{signal.market_sentiment}}, {{signal.confidence}}% confidence)\n{% endfor %}\n\n🤖 Generated by Multi-Market AI Trading Agent",
+        "additionalFields": {}
+      },
+      "name": "Send Telegram Summary",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        2220,
+        500
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram_bot_api",
+          "name": "Telegram Bot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "chatId",
+              "value": "your-telegram-chat-id"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set Telegram Chat ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        460,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare Market Symbols",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Market Symbols": {
+      "main": [
+        [
+          {
+            "node": "Process Each Symbol",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Each Symbol": {
+      "main": [
+        [
+          {
+            "node": "Fetch Market Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Market Data": {
+      "main": [
+        [
+          {
+            "node": "Generate Trading Signal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Trading Signal": {
+      "main": [
+        [
+          {
+            "node": "Analysis Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analysis Type": {
+      "main": [
+        [
+          {
+            "node": "Fundamental Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Combine Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fundamental Analysis": {
+      "main": [
+        [
+          {
+            "node": "Combine Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Combine Results": {
+      "main": [
+        [
+          {
+            "node": "Generate Summary Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Summary Report": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Telegram Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "YOUR_INSTANCE_ID"
+  },
+  "tags": [
+    {
+      "name": "trading",
+      "createdAt": "2025-07-05T01:04:00.000Z",
+      "updatedAt": "2025-07-05T01:04:00.000Z"
+    },
+    {
+      "name": "ai",
+      "createdAt": "2025-07-05T01:04:00.000Z",
+      "updatedAt": "2025-07-05T01:04:00.000Z"
+    },
+    {
+      "name": "multi-market",
+      "createdAt": "2025-07-05T01:04:00.000Z",
+      "updatedAt": "2025-07-05T01:04:00.000Z"
+    }
+  ]
+}

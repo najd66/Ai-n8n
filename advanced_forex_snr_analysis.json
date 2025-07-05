@@ -1,0 +1,260 @@
+{
+  "name": "Advanced Forex SNR Analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "/snr-analysis",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "snr-analysis-webhook"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract request data\nconst inputData = $input.item.json;\n\n// Get symbol and timeframe from request\nconst symbol = inputData.symbol || 'EURUSD';\nconst timeframe = inputData.timeframe || '1h';\n\nreturn {\n  json: {\n    symbol,\n    timeframe,\n    requestId: inputData.requestId || Date.now().toString(),\n    userId: inputData.userId || 'anonymous',\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "name": "Prepare Request",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.forexdata.com/v1/candles?symbol={{$json[\"symbol\"]}}&timeframe={{$json[\"timeframe\"]}}&limit=200",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Fetch Historical Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "forex_api_key",
+          "name": "Forex API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Process the raw forex data for SNR analysis\nconst rawData = $input.item.json;\nconst symbol = $input.item.json.symbol || $json.symbol;\nconst timeframe = $input.item.json.timeframe || $json.timeframe;\n\n// Mock data structure if API is not available\nlet processedData;\nif (!Array.isArray(rawData) || rawData.length === 0) {\n  // Generate mock data for testing\n  processedData = [];\n  const basePrice = symbol === 'XAUUSD' ? 2000 : 1.1;\n  const now = new Date();\n  \n  for (let i = 0; i < 200; i++) {\n    const timestamp = new Date(now.getTime() - (i * getTimeframeMinutes(timeframe) * 60 * 1000));\n    const volatility = symbol === 'XAUUSD' ? 5 : 0.0005;\n    const open = basePrice + (Math.random() - 0.5) * volatility * 10;\n    const high = open + Math.random() * volatility;\n    const low = open - Math.random() * volatility;\n    const close = low + Math.random() * (high - low);\n    const volume = Math.floor(Math.random() * 1000) + 500;\n    \n    processedData.unshift({\n      timestamp: timestamp.toISOString(),\n      open,\n      high,\n      low,\n      close,\n      volume\n    });\n  }\n} else {\n  // Process actual API data\n  processedData = rawData.map(candle => ({\n    timestamp: new Date(candle.timestamp).toISOString(),\n    open: parseFloat(candle.open),\n    high: parseFloat(candle.high),\n    low: parseFloat(candle.low),\n    close: parseFloat(candle.close),\n    volume: parseFloat(candle.volume || 0)\n  }));\n}\n\n// Helper function to convert timeframe to minutes\nfunction getTimeframeMinutes(timeframe) {\n  switch(timeframe) {\n    case '1m': return 1;\n    case '5m': return 5;\n    case '15m': return 15;\n    case '30m': return 30;\n    case '1h': return 60;\n    case '4h': return 240;\n    case 'D': return 1440;\n    default: return 15;\n  }\n}\n\n// Advanced SNR Analysis Functions\n\n// 1. Identify swing highs and lows\nfunction findSwings(data, lookback = 5) {\n  const swingHighs = [];\n  const swingLows = [];\n  \n  // Skip first and last few candles based on lookback\n  for (let i = lookback; i < data.length - lookback; i++) {\n    // Check for swing high\n    let isSwingHigh = true;\n    for (let j = i - lookback; j < i; j++) {\n      if (data[j].high > data[i].high) {\n        isSwingHigh = false;\n        break;\n      }\n    }\n    for (let j = i + 1; j <= i + lookback; j++) {\n      if (data[j].high > data[i].high) {\n        isSwingHigh = false;\n        break;\n      }\n    }\n    \n    if (isSwingHigh) {\n      swingHighs.push({\n        price: data[i].high,\n        index: i,\n        timestamp: data[i].timestamp\n      });\n    }\n    \n    // Check for swing low\n    let isSwingLow = true;\n    for (let j = i - lookback; j < i; j++) {\n      if (data[j].low < data[i].low) {\n        isSwingLow = false;\n        break;\n      }\n    }\n    for (let j = i + 1; j <= i + lookback; j++) {\n      if (data[j].low < data[i].low) {\n        isSwingLow = false;\n        break;\n      }\n    }\n    \n    if (isSwingLow) {\n      swingLows.push({\n        price: data[i].low,\n        index: i,\n        timestamp: data[i].timestamp\n      });\n    }\n  }\n  \n  return { swingHighs, swingLows };\n}\n\n// 2. Identify support and resistance zones\nfunction identifySNRZones(data, swings, threshold = 0.001) {\n  const { swingHighs, swingLows } = swings;\n  \n  // Adjust threshold based on symbol (higher for gold)\n  const priceThreshold = symbol === 'XAUUSD' ? threshold * 10 : threshold;\n  \n  // Group swing highs into resistance zones\n  const resistanceZones = [];\n  for (let i = 0; i < swingHighs.length; i++) {\n    const currentHigh = swingHighs[i].price;\n    let zoneFound = false;\n    \n    // Check if this swing high belongs to an existing zone\n    for (let j = 0; j < resistanceZones.length; j++) {\n      const zone = resistanceZones[j];\n      const zoneMidpoint = (zone.upper + zone.lower) / 2;\n      \n      // If price is within threshold of zone midpoint, add to zone\n      if (Math.abs(currentHigh - zoneMidpoint) / zoneMidpoint < priceThreshold) {\n        // Update zone boundaries if needed\n        if (currentHigh > zone.upper) {\n          zone.upper = currentHigh;\n        } else if (currentHigh < zone.lower) {\n          zone.lower = currentHigh;\n        }\n        \n        // Add this swing to the zone's touches\n        zone.touches.push({\n          price: currentHigh,\n          timestamp: swingHighs[i].timestamp\n        });\n        \n        zoneFound = true;\n        break;\n      }\n    }\n    \n    // If no matching zone found, create a new one\n    if (!zoneFound) {\n      resistanceZones.push({\n        upper: currentHigh * (1 + priceThreshold/2),\n        lower: currentHigh * (1 - priceThreshold/2),\n        midpoint: currentHigh,\n        touches: [{\n          price: currentHigh,\n          timestamp: swingHighs[i].timestamp\n        }],\n        strength: 1 // Initial strength\n      });\n    }\n  }\n  \n  // Group swing lows into support zones\n  const supportZones = [];\n  for (let i = 0; i < swingLows.length; i++) {\n    const currentLow = swingLows[i].price;\n    let zoneFound = false;\n    \n    // Check if this swing low belongs to an existing zone\n    for (let j = 0; j < supportZones.length; j++) {\n      const zone = supportZones[j];\n      const zoneMidpoint = (zone.upper + zone.lower) / 2;\n      \n      // If price is within threshold of zone midpoint, add to zone\n      if (Math.abs(currentLow - zoneMidpoint) / zoneMidpoint < priceThreshold) {\n        // Update zone boundaries if needed\n        if (currentLow < zone.lower) {\n          zone.lower = currentLow;\n        } else if (currentLow > zone.upper) {\n          zone.upper = currentLow;\n        }\n        \n        // Add this swing to the zone's touches\n        zone.touches.push({\n          price: currentLow,\n          timestamp: swingLows[i].timestamp\n        });\n        \n        zoneFound = true;\n        break;\n      }\n    }\n    \n    // If no matching zone found, create a new one\n    if (!zoneFound) {\n      supportZones.push({\n        upper: currentLow * (1 + priceThreshold/2),\n        lower: currentLow * (1 - priceThreshold/2),\n        midpoint: currentLow,\n        touches: [{\n          price: currentLow,\n          timestamp: swingLows[i].timestamp\n        }],\n        strength: 1 // Initial strength\n      });\n    }\n  }\n  \n  // Calculate zone strength based on number of touches and recency\n  const now = new Date();\n  \n  // Process resistance zones\n  resistanceZones.forEach(zone => {\n    // More touches = stronger zone\n    zone.strength = zone.touches.length;\n    \n    // Calculate recency factor (more recent touches increase strength)\n    let recencyScore = 0;\n    zone.touches.forEach(touch => {\n      const touchTime = new Date(touch.timestamp);\n      const hoursSince = (now - touchTime) / (1000 * 60 * 60);\n      // Touches within last 24 hours are weighted more\n      if (hoursSince < 24) {\n        recencyScore += 0.5;\n      } else if (hoursSince < 72) {\n        recencyScore += 0.3;\n      } else {\n        recencyScore += 0.1;\n      }\n    });\n    \n    zone.strength += recencyScore;\n    zone.midpoint = (zone.upper + zone.lower) / 2;\n  });\n  \n  // Process support zones\n  supportZones.forEach(zone => {\n    // More touches = stronger zone\n    zone.strength = zone.touches.length;\n    \n    // Calculate recency factor (more recent touches increase strength)\n    let recencyScore = 0;\n    zone.touches.forEach(touch => {\n      const touchTime = new Date(touch.timestamp);\n      const hoursSince = (now - touchTime) / (1000 * 60 * 60);\n      // Touches within last 24 hours are weighted more\n      if (hoursSince < 24) {\n        recencyScore += 0.5;\n      } else if (hoursSince < 72) {\n        recencyScore += 0.3;\n      } else {\n        recencyScore += 0.1;\n      }\n    });\n    \n    zone.strength += recencyScore;\n    zone.midpoint = (zone.upper + zone.lower) / 2;\n  });\n  \n  // Sort zones by strength (descending)\n  resistanceZones.sort((a, b) => b.strength - a.strength);\n  supportZones.sort((a, b) => b.strength - a.strength);\n  \n  return { resistanceZones, supportZones };\n}\n\n// 3. Identify market structure\nfunction identifyMarketStructure(data, swings) {\n  const { swingHighs, swingLows } = swings;\n  \n  // Need at least 2 swing highs and 2 swing lows to determine structure\n  if (swingHighs.length < 2 || swingLows.length < 2) {\n    return {\n      trend: 'undefined',\n      structure: 'insufficient data'\n    };\n  }\n  \n  // Sort swings by index (chronological order)\n  swingHighs.sort((a, b) => a.index - b.index);\n  swingLows.sort((a, b) => a.index - b.index);\n  \n  // Check for higher highs and higher lows (uptrend)\n  const higherHighs = swingHighs[swingHighs.length - 1].price > swingHighs[swingHighs.length - 2].price;\n  const higherLows = swingLows[swingLows.length - 1].price > swingLows[swingLows.length - 2].price;\n  \n  // Check for lower highs and lower lows (downtrend)\n  const lowerHighs = swingHighs[swingHighs.length - 1].price < swingHighs[swingHighs.length - 2].price;\n  const lowerLows = swingLows[swingLows.length - 1].price < swingLows[swingLows.length - 2].price;\n  \n  // Determine trend\n  let trend, structure;\n  \n  if (higherHighs && higherLows) {\n    trend = 'uptrend';\n    structure = 'strong uptrend';\n  } else if (lowerHighs && lowerLows) {\n    trend = 'downtrend';\n    structure = 'strong downtrend';\n  } else if (higherHighs && lowerLows) {\n    trend = 'uptrend';\n    structure = 'weak uptrend';\n  } else if (lowerHighs && higherLows) {\n    trend = 'downtrend';\n    structure = 'weak downtrend';\n  } else if (higherLows) {\n    trend = 'uptrend';\n    structure = 'potential uptrend';\n  } else if (lowerHighs) {\n    trend = 'downtrend';\n    structure = 'potential downtrend';\n  } else {\n    trend = 'ranging';\n    structure = 'consolidation';\n  }\n  \n  // Check for potential trend reversal\n  let potentialReversal = false;\n  let reversalType = null;\n  \n  if (trend === 'uptrend' && lowerHighs) {\n    potentialReversal = true;\n    reversalType = 'bearish';\n  } else if (trend === 'downtrend' && higherLows) {\n    potentialReversal = true;\n    reversalType = 'bullish';\n  }\n  \n  return {\n    trend,\n    structure,\n    potentialReversal,\n    reversalType\n  };\n}\n\n// 4. Identify key price levels\nfunction identifyKeyLevels(data, zones) {\n  const { resistanceZones, supportZones } = zones;\n  const currentPrice = data[data.length - 1].close;\n  \n  // Get top 5 strongest zones\n  const topResistance = resistanceZones.slice(0, 5);\n  const topSupport = supportZones.slice(0, 5);\n  \n  // Find nearest resistance and support\n  let nearestResistance = null;\n  let nearestSupport = null;\n  let minResistanceDist = Infinity;\n  let minSupportDist = Infinity;\n  \n  topResistance.forEach(zone => {\n    if (zone.midpoint > currentPrice) {\n      const distance = zone.midpoint - currentPrice;\n      if (distance < minResistanceDist) {\n        minResistanceDist = distance;\n        nearestResistance = zone;\n      }\n    }\n  });\n  \n  topSupport.forEach(zone => {\n    if (zone.midpoint < currentPrice) {\n      const distance = currentPrice - zone.midpoint;\n      if (distance < minSupportDist) {\n        minSupportDist = distance;\n        nearestSupport = zone;\n      }\n    }\n  });\n  \n  // Calculate distance to nearest levels as percentage\n  const resistanceDistance = nearestResistance ? \n    ((nearestResistance.midpoint - currentPrice) / currentPrice) * 100 : null;\n  \n  const supportDistance = nearestSupport ? \n    ((currentPrice - nearestSupport.midpoint) / currentPrice) * 100 : null;\n  \n  return {\n    nearestResistance,\n    nearestSupport,\n    resistanceDistance,\n    supportDistance,\n    topResistance,\n    topSupport\n  };\n}\n\n// 5. Identify potential trade setups\nfunction identifyTradeSetups(data, structure, keyLevels) {\n  const currentPrice = data[data.length - 1].close;\n  const { trend, potentialReversal, reversalType } = structure;\n  const { nearestResistance, nearestSupport, resistanceDistance, supportDistance } = keyLevels;\n  \n  const setups = [];\n  \n  // 1. Trend continuation setup\n  if (trend === 'uptrend' && !potentialReversal && nearestSupport) {\n    setups.push({\n      type: 'trend_continuation',\n      direction: 'buy',\n      entry: nearestSupport.midpoint,\n      stopLoss: nearestSupport.lower * 0.998, // Just below support zone\n      takeProfit: nearestResistance ? nearestResistance.midpoint : currentPrice * 1.01,\n      description: 'Buy at support in uptrend',\n      confidence: supportDistance < 0.5 ? 'high' : 'medium' // Higher confidence if price is close to support\n    });\n  } else if (trend === 'downtrend' && !potentialReversal && nearestResistance) {\n    setups.push({\n      type: 'trend_continuation',\n      direction: 'sell',\n      entry: nearestResistance.midpoint,\n      stopLoss: nearestResistance.upper * 1.002, // Just above resistance zone\n      takeProfit: nearestSupport ? nearestSupport.midpoint : currentPrice * 0.99,\n      description: 'Sell at resistance in downtrend',\n      confidence: resistanceDistance < 0.5 ? 'high' : 'medium' // Higher confidence if price is close to resistance\n    });\n  }\n  \n  // 2. Breakout setup\n  if (nearestResistance && resistanceDistance < 0.2) {\n    setups.push({\n      type: 'breakout',\n      direction: 'buy',\n      entry: nearestResistance.upper,\n      stopLoss: nearestResistance.lower,\n      takeProfit: nearestResistance.upper + (nearestResistance.upper - nearestResistance.lower) * 2,\n      description: 'Buy breakout above resistance',\n      confidence: trend === 'uptrend' ? 'high' : 'medium'\n    });\n  }\n  \n  if (nearestSupport && supportDistance < 0.2) {\n    setups.push({\n      type: 'breakout',\n      direction: 'sell',\n      entry: nearestSupport.lower,\n      stopLoss: nearestSupport.upper,\n      takeProfit: nearestSupport.lower - (nearestSupport.upper - nearestSupport.lower) * 2,\n      description: 'Sell breakout below support',\n      confidence: trend === 'downtrend' ? 'high' : 'medium'\n    });\n  }\n  \n  // 3. Reversal setup\n  if (potentialReversal) {\n    if (reversalType === 'bullish' && nearestSupport) {\n      setups.push({\n        type: 'reversal',\n        direction: 'buy',\n        entry: currentPrice,\n        stopLoss: nearestSupport.lower * 0.998,\n        takeProfit: currentPrice + (currentPrice - nearestSupport.lower) * 2,\n        description: 'Potential bullish reversal',\n        confidence: 'medium'\n      });\n    } else if (reversalType === 'bearish' && nearestResistance) {\n      setups.push({\n        type: 'reversal',\n        direction: 'sell',\n        entry: currentPrice,\n        stopLoss: nearestResistance.upper * 1.002,\n        takeProfit: currentPrice - (nearestResistance.upper - currentPrice) * 2,\n        description: 'Potential bearish reversal',\n        confidence: 'medium'\n      });\n    }\n  }\n  \n  // Sort setups by confidence\n  const confidenceMap = { 'high': 3, 'medium': 2, 'low': 1 };\n  setups.sort((a, b) => confidenceMap[b.confidence] - confidenceMap[a.confidence]);\n  \n  return setups;\n}\n\n// Perform SNR analysis\nconst swings = findSwings(processedData);\nconst snrZones = identifySNRZones(processedData, swings);\nconst marketStructure = identifyMarketStructure(processedData, swings);\nconst keyLevels = identifyKeyLevels(processedData, snrZones);\nconst tradeSetups = identifyTradeSetups(processedData, marketStructure, keyLevels);\n\n// Current price\nconst currentPrice = processedData[processedData.length - 1].close;\n\n// Prepare analysis data\nconst snrAnalysis = {\n  symbol,\n  timeframe,\n  currentPrice,\n  timestamp: processedData[processedData.length - 1].timestamp,\n  marketStructure,\n  keyLevels: {\n    resistance: keyLevels.topResistance.map(zone => ({\n      level: zone.midpoint,\n      strength: zone.strength,\n      touches: zone.touches.length\n    })),\n    support: keyLevels.topSupport.map(zone => ({\n      level: zone.midpoint,\n      strength: zone.strength,\n      touches: zone.touches.length\n    }))\n  },\n  nearestLevels: {\n    resistance: keyLevels.nearestResistance ? {\n      level: keyLevels.nearestResistance.midpoint,\n      distance: keyLevels.resistanceDistance\n    } : null,\n    support: keyLevels.nearestSupport ? {\n      level: keyLevels.nearestSupport.midpoint,\n      distance: keyLevels.supportDistance\n    } : null\n  },\n  tradeSetups\n};\n\nreturn {json: snrAnalysis};"
+      },
+      "name": "Perform SNR Analysis",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "apiKey",
+        "apiKey": "{{$node[\"Set OpenAI API Key\"].json[\"apiKey\"]}}",
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4-turbo",
+        "prompt": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are an expert forex trader specializing in Support and Resistance (SNR) analysis. You have decades of experience in price action trading and can identify high-probability trade setups based on market structure and key price levels. Your analysis should be precise, actionable, and focused on the most reliable trade opportunities."
+            },
+            {
+              "role": "user",
+              "content": "=== FOREX SNR ANALYSIS ===\nSymbol: {{$json[\"symbol\"]}}\nTimeframe: {{$json[\"timeframe\"]}}\nCurrent Price: {{$json[\"currentPrice\"]}}\nTimestamp: {{$json[\"timestamp\"]}}\n\n=== MARKET STRUCTURE ===\nTrend: {{$json[\"marketStructure\"][\"trend\"]}}\nStructure: {{$json[\"marketStructure\"][\"structure\"]}}\nPotential Reversal: {{$json[\"marketStructure\"][\"potentialReversal\"]}}\nReversal Type: {{$json[\"marketStructure\"][\"reversalType\"]}}\n\n=== KEY LEVELS ===\nResistance Levels:\n{% for level in $json[\"keyLevels\"][\"resistance\"] %}\n- {{level.level}} (Strength: {{level.strength}}, Touches: {{level.touches}})\n{% endfor %}\n\nSupport Levels:\n{% for level in $json[\"keyLevels\"][\"support\"] %}\n- {{level.level}} (Strength: {{level.strength}}, Touches: {{level.touches}})\n{% endfor %}\n\nNearest Resistance: {% if $json[\"nearestLevels\"][\"resistance\"] %}{{$json[\"nearestLevels\"][\"resistance\"][\"level\"]}} ({{$json[\"nearestLevels\"][\"resistance\"][\"distance\"]}}% away){% else %}None identified{% endif %}\nNearest Support: {% if $json[\"nearestLevels\"][\"support\"] %}{{$json[\"nearestLevels\"][\"support\"][\"level\"]}} ({{$json[\"nearestLevels\"][\"support\"][\"distance\"]}}% away){% else %}None identified{% endif %}\n\n=== TRADE SETUPS ===\n{% for setup in $json[\"tradeSetups\"] %}\n- Type: {{setup.type}}\n  Direction: {{setup.direction}}\n  Entry: {{setup.entry}}\n  Stop Loss: {{setup.stopLoss}}\n  Take Profit: {{setup.takeProfit}}\n  Description: {{setup.description}}\n  Confidence: {{setup.confidence}}\n{% endfor %}\n\nBased on this SNR analysis, provide a professional forex trading assessment with the following:\n1. Detailed market structure analysis\n2. Evaluation of key support and resistance levels\n3. Assessment of the highest probability trade setup\n4. Specific entry, stop loss, and take profit recommendations\n5. Risk management advice\n6. Confidence level in the recommended trade\n\nFormat your response as a JSON object with the following structure:\n{\n  \"market_structure\": {\n    \"trend\": \"uptrend/downtrend/ranging\",\n    \"strength\": \"strong/moderate/weak\",\n    \"key_observation\": \"Brief description of important structure elements\"\n  },\n  \"key_levels\": {\n    \"critical_resistance\": [level1, level2],\n    \"critical_support\": [level1, level2],\n    \"level_assessment\": \"Brief assessment of the key levels\"\n  },\n  \"trade_recommendation\": {\n    \"direction\": \"buy/sell/none\",\n    \"setup_type\": \"trend_continuation/reversal/breakout/none\",\n    \"entry\": entry_price_or_zone,\n    \"stop_loss\": stop_loss_level,\n    \"take_profit\": [tp1, tp2],\n    \"risk_reward\": risk_reward_ratio\n  },\n  \"risk_management\": {\n    \"position_size\": \"Recommendation on position sizing\",\n    \"max_risk_percent\": recommended_risk_percentage\n  },\n  \"confidence\": confidence_percentage,\n  \"analysis_summary\": \"Comprehensive explanation of your reasoning\"\n}"
+            }
+          ]
+        },
+        "options": {
+          "responseFormat": {
+            "type": "json_object"
+          }
+        }
+      },
+      "name": "Generate SNR Analysis",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "{{$node[\"Set Telegram Chat ID\"].json[\"chatId\"]}}",
+        "text": "=== 📊 ADVANCED SNR ANALYSIS 📊 ===\n\n🪙 {{$node[\"Perform SNR Analysis\"].json[\"symbol\"]}} ({{$node[\"Perform SNR Analysis\"].json[\"timeframe\"]}})\n💰 Current Price: {{$node[\"Perform SNR Analysis\"].json[\"currentPrice\"]}}\n⏰ Generated: {{$node[\"Perform SNR Analysis\"].json[\"timestamp\"]}}\n\n🔍 MARKET STRUCTURE:\n- Trend: {{$json[\"market_structure\"][\"trend\"]}}\n- Strength: {{$json[\"market_structure\"][\"strength\"]}}\n- Key Observation: {{$json[\"market_structure\"][\"key_observation\"]}}\n\n📍 KEY LEVELS:\n- Critical Resistance: {{$json[\"key_levels\"][\"critical_resistance\"].join(\", \")}}\n- Critical Support: {{$json[\"key_levels\"][\"critical_support\"].join(\", \")}}\n- Assessment: {{$json[\"key_levels\"][\"level_assessment\"]}}\n\n⚡ TRADE RECOMMENDATION:\n- Direction: {{$json[\"trade_recommendation\"][\"direction\"]}}\n- Setup Type: {{$json[\"trade_recommendation\"][\"setup_type\"]}}\n- Entry: {{$json[\"trade_recommendation\"][\"entry\"]}}\n- Stop Loss: {{$json[\"trade_recommendation\"][\"stop_loss\"]}}\n- Take Profit: {{$json[\"trade_recommendation\"][\"take_profit\"].join(\", \")}}\n- Risk/Reward: {{$json[\"trade_recommendation\"][\"risk_reward\"]}}\n\n⚖️ RISK MANAGEMENT:\n- Position Size: {{$json[\"risk_management\"][\"position_size\"]}}\n- Max Risk: {{$json[\"risk_management\"][\"max_risk_percent\"]}}%\n\n🎯 Confidence: {{$json[\"confidence\"]}}%\n\n💡 ANALYSIS:\n{{$json[\"analysis_summary\"]}}\n\n🤖 Generated by Advanced Forex SNR Analysis",
+        "additionalFields": {}
+      },
+      "name": "Send Telegram Analysis",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram_bot_api",
+          "name": "Telegram Bot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "apiKey",
+              "value": "your-openai-api-key"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set OpenAI API Key",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        240,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "chatId",
+              "value": "your-telegram-chat-id"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set Telegram Chat ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        460,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseData": "={{ $json }}",
+        "options": {}
+      },
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Request": {
+      "main": [
+        [
+          {
+            "node": "Fetch Historical Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Historical Data": {
+      "main": [
+        [
+          {
+            "node": "Perform SNR Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Perform SNR Analysis": {
+      "main": [
+        [
+          {
+            "node": "Generate SNR Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate SNR Analysis": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Analysis",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "YOUR_INSTANCE_ID"
+  },
+  "tags": [
+    {
+      "name": "forex",
+      "createdAt": "2025-07-05T01:04:00.000Z",
+      "updatedAt": "2025-07-05T01:04:00.000Z"
+    },
+    {
+      "name": "snr",
+      "createdAt": "2025-07-05T01:04:00.000Z",
+      "updatedAt": "2025-07-05T01:04:00.000Z"
+    },
+    {
+      "name": "analysis",
+      "createdAt": "2025-07-05T01:04:00.000Z",
+      "updatedAt": "2025-07-05T01:04:00.000Z"
+    }
+  ]
+}

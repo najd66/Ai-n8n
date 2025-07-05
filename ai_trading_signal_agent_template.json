@@ -1,0 +1,309 @@
+{
+  "name": "AI Trading Signal Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.binance.com/api/v3/klines",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "BTCUSDT"
+            },
+            {
+              "name": "interval",
+              "value": "1h"
+            },
+            {
+              "name": "limit",
+              "value": "40"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Fetch Market Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Process the raw market data into a format suitable for analysis\nconst rawData = $input.item.json;\n\n// Format: [timestamp, open, high, low, close, volume, ...]\nconst processedData = rawData.map(candle => {\n  return {\n    timestamp: new Date(candle[0]).toISOString(),\n    open: parseFloat(candle[1]),\n    high: parseFloat(candle[2]),\n    low: parseFloat(candle[3]),\n    close: parseFloat(candle[4]),\n    volume: parseFloat(candle[5])\n  };\n});\n\n// Calculate basic technical indicators\nconst calculateRSI = (data, period = 14) => {\n  let gains = 0;\n  let losses = 0;\n  \n  // Initial RSI calculation\n  for (let i = 1; i <= period; i++) {\n    const change = data[i].close - data[i-1].close;\n    if (change >= 0) {\n      gains += change;\n    } else {\n      losses -= change;\n    }\n  }\n  \n  let avgGain = gains / period;\n  let avgLoss = losses / period;\n  \n  // Calculate RSI for the remaining data\n  const rsiValues = [];\n  for (let i = period; i < data.length; i++) {\n    if (avgLoss === 0) {\n      rsiValues.push(100);\n    } else {\n      const RS = avgGain / avgLoss;\n      rsiValues.push(100 - (100 / (1 + RS)));\n    }\n    \n    // Update average gain and loss\n    if (i < data.length - 1) {\n      const change = data[i+1].close - data[i].close;\n      if (change >= 0) {\n        avgGain = (avgGain * (period - 1) + change) / period;\n        avgLoss = (avgLoss * (period - 1)) / period;\n      } else {\n        avgGain = (avgGain * (period - 1)) / period;\n        avgLoss = (avgLoss * (period - 1) - change) / period;\n      }\n    }\n  }\n  \n  return rsiValues[rsiValues.length - 1];\n};\n\n// Calculate Moving Averages\nconst calculateSMA = (data, period) => {\n  const prices = data.map(candle => candle.close);\n  let sum = 0;\n  for (let i = prices.length - period; i < prices.length; i++) {\n    sum += prices[i];\n  }\n  return sum / period;\n};\n\nconst calculateEMA = (data, period) => {\n  const prices = data.map(candle => candle.close);\n  const k = 2 / (period + 1);\n  let ema = calculateSMA(data.slice(0, period), period);\n  \n  for (let i = period; i < prices.length; i++) {\n    ema = prices[i] * k + ema * (1 - k);\n  }\n  \n  return ema;\n};\n\n// Calculate MACD\nconst calculateMACD = (data) => {\n  const ema12 = calculateEMA(data, 12);\n  const ema26 = calculateEMA(data, 26);\n  const macdLine = ema12 - ema26;\n  const signalLine = calculateEMA([...data.slice(0, data.length - 9), {close: macdLine}], 9);\n  const histogram = macdLine - signalLine;\n  \n  return {\n    macdLine,\n    signalLine,\n    histogram\n  };\n};\n\n// Calculate Bollinger Bands\nconst calculateBollingerBands = (data, period = 20, stdDev = 2) => {\n  const prices = data.map(candle => candle.close);\n  const sma = calculateSMA(data, period);\n  \n  // Calculate standard deviation\n  let sum = 0;\n  for (let i = prices.length - period; i < prices.length; i++) {\n    sum += Math.pow(prices[i] - sma, 2);\n  }\n  const std = Math.sqrt(sum / period);\n  \n  return {\n    middle: sma,\n    upper: sma + (stdDev * std),\n    lower: sma - (stdDev * std)\n  };\n};\n\n// Calculate indicators\nconst rsi = calculateRSI(processedData);\nconst sma20 = calculateSMA(processedData, 20);\nconst ema20 = calculateEMA(processedData, 20);\nconst macd = calculateMACD(processedData);\nconst bollingerBands = calculateBollingerBands(processedData);\n\n// Current price\nconst currentPrice = processedData[processedData.length - 1].close;\n\n// Prepare analysis data\nconst technicalAnalysis = {\n  symbol: \"BTCUSDT\",\n  currentPrice,\n  timestamp: processedData[processedData.length - 1].timestamp,\n  indicators: {\n    rsi,\n    sma20,\n    ema20,\n    macd,\n    bollingerBands\n  },\n  processedData: processedData.slice(-5) // Include only the last 5 candles for reference\n};\n\nreturn {json: technicalAnalysis};"
+      },
+      "name": "Process Market Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "apiKey",
+        "apiKey": "{{$node[\"Set OpenAI API Key\"].json[\"apiKey\"]}}",
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4-turbo",
+        "prompt": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are an expert financial analyst and trading signal generator. Your task is to analyze market data and technical indicators to generate precise trading signals. You should provide clear buy, sell, or hold recommendations based on the data provided. Your analysis should be concise, data-driven, and actionable."
+            },
+            {
+              "role": "user",
+              "content": "=== MARKET DATA ===\nSymbol: {{$node[\"Process Market Data\"].json[\"symbol\"]}}\nCurrent Price: {{$node[\"Process Market Data\"].json[\"currentPrice\"]}}\nTimestamp: {{$node[\"Process Market Data\"].json[\"timestamp\"]}}\n\n=== TECHNICAL INDICATORS ===\nRSI (14): {{$node[\"Process Market Data\"].json[\"indicators\"][\"rsi\"]}}\nSMA (20): {{$node[\"Process Market Data\"].json[\"indicators\"][\"sma20\"]}}\nEMA (20): {{$node[\"Process Market Data\"].json[\"indicators\"][\"ema20\"]}}\nMACD Line: {{$node[\"Process Market Data\"].json[\"indicators\"][\"macd\"][\"macdLine\"]}}\nMACD Signal: {{$node[\"Process Market Data\"].json[\"indicators\"][\"macd\"][\"signalLine\"]}}\nMACD Histogram: {{$node[\"Process Market Data\"].json[\"indicators\"][\"macd\"][\"histogram\"]}}\nBollinger Bands:\n  - Upper: {{$node[\"Process Market Data\"].json[\"indicators\"][\"bollingerBands\"][\"upper\"]}}\n  - Middle: {{$node[\"Process Market Data\"].json[\"indicators\"][\"bollingerBands\"][\"middle\"]}}\n  - Lower: {{$node[\"Process Market Data\"].json[\"indicators\"][\"bollingerBands\"][\"lower\"]}}\n\nBased on this data, provide a trading signal analysis with the following:\n1. Current market sentiment (bullish, bearish, or neutral)\n2. Key support and resistance levels\n3. Trading signal recommendation (BUY, SELL, or HOLD)\n4. Risk assessment (Low, Medium, High)\n5. Confidence level in your analysis (percentage)\n\nFormat your response as a JSON object with the following structure:\n{\n  \"market_sentiment\": \"bullish/bearish/neutral\",\n  \"key_levels\": {\n    \"support\": [level1, level2],\n    \"resistance\": [level1, level2]\n  },\n  \"signal\": \"BUY/SELL/HOLD\",\n  \"risk_level\": \"Low/Medium/High\",\n  \"confidence\": percentage,\n  \"analysis_summary\": \"Brief explanation of your reasoning\"\n}"
+            }
+          ]
+        },
+        "options": {
+          "responseFormat": {
+            "type": "json_object"
+          }
+        }
+      },
+      "name": "Generate Trading Signal",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json[\"signal\"]}}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "name": "Valid Signal?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "{{$node[\"Set Telegram Chat ID\"].json[\"chatId\"]}}",
+        "text": "=== 📊 TRADING SIGNAL ALERT 📊 ===\n\n🪙 Symbol: {{$node[\"Process Market Data\"].json[\"symbol\"]}}\n💰 Current Price: {{$node[\"Process Market Data\"].json[\"currentPrice\"]}}\n⏰ Generated: {{$node[\"Process Market Data\"].json[\"timestamp\"]}}\n\n📈 SIGNAL: {{$json[\"signal\"]}}\n\n🔍 Market Sentiment: {{$json[\"market_sentiment\"]}}\n⚖️ Risk Level: {{$json[\"risk_level\"]}}\n🎯 Confidence: {{$json[\"confidence\"]}}%\n\n💡 Analysis:\n{{$json[\"analysis_summary\"]}}\n\n📍 Key Levels:\n  Support: {{$json[\"key_levels\"][\"support\"].join(\", \")}}\n  Resistance: {{$json[\"key_levels\"][\"resistance\"].join(\", \")}}\n\n🤖 Generated by AI Trading Signal Agent",
+        "additionalFields": {}
+      },
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        200
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram_bot_api",
+          "name": "Telegram Bot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "apiKey",
+              "value": "your-openai-api-key"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set OpenAI API Key",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        240,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "chatId",
+              "value": "your-telegram-chat-id"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set Telegram Chat ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        460,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.yourwebhook.com/trading-signals",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "signal",
+              "value": "={{ $json }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Send to Database/API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1340,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Log error for debugging\nconsole.log('Invalid signal generated:', $input.item);\n\nreturn {\n  json: {\n    error: 'Invalid trading signal generated',\n    timestamp: new Date().toISOString(),\n    data: $input.item\n  }\n};"
+      },
+      "name": "Handle Error",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        600
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Market Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Market Data": {
+      "main": [
+        [
+          {
+            "node": "Process Market Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Market Data": {
+      "main": [
+        [
+          {
+            "node": "Generate Trading Signal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Trading Signal": {
+      "main": [
+        [
+          {
+            "node": "Valid Signal?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Signal?": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send to Database/API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "YOUR_INSTANCE_ID"
+  },
+  "tags": [
+    {
+      "name": "trading",
+      "createdAt": "2025-07-05T01:04:00.000Z",
+      "updatedAt": "2025-07-05T01:04:00.000Z"
+    },
+    {
+      "name": "ai",
+      "createdAt": "2025-07-05T01:04:00.000Z",
+      "updatedAt": "2025-07-05T01:04:00.000Z"
+    },
+    {
+      "name": "signals",
+      "createdAt": "2025-07-05T01:04:00.000Z",
+      "updatedAt": "2025-07-05T01:04:00.000Z"
+    }
+  ]
+}
